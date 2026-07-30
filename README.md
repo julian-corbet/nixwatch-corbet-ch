@@ -147,13 +147,15 @@ worse than one that never had it:
   to nixpush's own domain now (or a future nixpush v2 daemon; see nixpush's own README), not
   duplicated here. `severity` maps onto nixpush's own `--priority`
   (info → low, warning → default, critical → urgent); it never invents its OWN delivery
-  preference logic on top. **This one is a genuine, not-yet-closed gap, unlike recovery
-  hysteresis above**: nixpush v1 is explicitly synchronous with no daemon and no persistent
-  queue (its own README's "Non-goals & future direction"), and has no concept of a
-  channel-with-fallback at all. A host retiring its own bespoke queue+fallback mechanism in
-  favor of nixwatch+nixpush should confirm first that it does not actually depend on either —
-  a `nixpush send` failure here is simply lost, once, not retried on a later tick the way the
-  old engine's queue would have.
+  preference logic on top. **CLOSED 2026-07-30 — this was a genuine gap and is no longer one.**
+  nixpush gained both halves, opt-in per channel: `durable` (a crash-safe on-disk spool, flushed
+  oldest-first by a one-shot timer, with poison messages moved aside so one permanently-rejected
+  alert cannot wedge the queue behind it) and `fallback` (degrade to another channel, engaged on an
+  unseal failure or a hard rejection but deliberately NOT on a transient failure, since retrying is
+  the right answer there and falling back would hide a recoverable fault behind a downgraded
+  alert). A host retiring its own bespoke queue therefore no longer loses those guarantees — but it
+  must set `durable` and `fallback` explicitly on the channel it cares about, because both default
+  to off so that nixpush stays a thin one-shot for everyone who never asked for a queue.
 - **No gatus-specific (or any other vendor-specific) dead-man's-switch receiver.** The old
   engine pushed its own liveness directly to gatus, a specific in-cluster dashboard, with
   gatus's own `heartbeat.interval` closing the "did the watchdog itself die" loop. nixwatch's
