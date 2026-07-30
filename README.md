@@ -11,15 +11,15 @@ heartbeat, no probe at all), an interval, a staleness deadline, a severity, and 
 alert fires exactly once per state TRANSITION — a still-failing tick never re-pages, a
 still-healthy one never speaks at all.
 
-This repo, and the design it implements, is a generalization of one private fleet's own
+This repo, and the design it implements, is a generalization of one private operator's own
 `fleet-watchdog.nix`: a systemd-timer engine born from an incident where a live host
 memory-wedged overnight — services dead, SSH dead — and **nothing noticed**, because that
-fleet's metrics stack was deliberately disabled for RAM, no uptime app existed, and the box
+operator's metrics stack was deliberately disabled for RAM, no uptime app existed, and the box
 that died also hosted the mail account any alert about its own death would have had to travel
 through. The fix that implementation landed on: probe every plane from OUTSIDE the thing
 being watched, alert only on a state transition, and push a heartbeat unconditionally so
 silence itself becomes detectable rather than reading as "all clear" by default. This repo is
-that mechanism, with every fleet-specific probe, hostname, and bespoke delivery-queue detail
+that mechanism, with every operator-specific probe, hostname, and bespoke delivery-queue detail
 stripped out — see [What changed vs. the implementation this generalizes](#what-changed-vs-the-implementation-this-generalizes)
 below for exactly what was cut, and why.
 
@@ -35,9 +35,9 @@ below for exactly what was cut, and why.
 - **Not a metrics/observability stack.** No Prometheus, no time series, no dashboard — one
   persisted `STATUS LAST_KNOWN_GOOD_EPOCH` file per check, nothing graphable, nothing
   queryable after the fact beyond that one line.
-- **Not the POLICY of what any one estate watches.** This repo ships the mechanism and
+- **Not the POLICY of what any one operator watches.** This repo ships the mechanism and
   generic examples only (see `examples/host/configuration.nix`). Which checks exist, what
-  their probes actually run, which real channels they page — that is private, per-estate
+  their probes actually run, which real channels they page — that is private, per-operator
   configuration, and it belongs there, never in this repo.
 - **Cannot detect its own death.** This is the one honest limit worth stating plainly rather
   than glossing over: a heartbeat check's `deadline` is a PROMISE folded into the beacon's own
@@ -72,7 +72,7 @@ Every check is one of:
 probe run, no state change, no alert — for as long as the named gate itself reads DOWN. This
 generalizes the implementation this module is built from, which hardcoded exactly one such
 relationship (a single "control probe" checking the hub's own network egress, gating every
-other fleet probe, so an egress blip couldn't fan out into "the whole fleet is down") into a
+other host probe, so an egress blip couldn't fan out into "everything is down") into a
 reusable relationship any check can declare against any other. The gate's own check already
 alerts once, for the shared root cause; its dependents staying silent while it's down is what
 keeps that one alert legible instead of buried under a dozen others saying the same thing in
@@ -281,7 +281,7 @@ it fires when violated and stays silent when satisfied.
 are real and checked-in: a real per-check systemd service + timer pair, a real generated
 script proven (in `checks/behavior.nix`) to alert on transition only, freeze while gated, and
 beacon unconditionally for a heartbeat — not stubs. Extracted and generalized from one private
-fleet's own `fleet-watchdog.nix`; see
+operator's own `fleet-watchdog.nix`; see
 [What changed vs. the implementation this generalizes](#what-changed-vs-the-implementation-this-generalizes)
 for exactly what did not survive the generalization, and why.
 

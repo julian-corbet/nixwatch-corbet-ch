@@ -35,7 +35,7 @@ in
   #
   # `stateDir` and `nixpushCmd` are inserted into the generated script inside a single pair
   # of double quotes, UNESCAPED beyond that -- deliberately: this is the same convention the
-  # implementation this module generalizes (a private fleet's own fleet-watchdog.nix) used
+  # implementation this module generalizes (a private operator's own fleet-watchdog.nix) used
   # for its own `STATE=${cfg.stateDir}/state`, and it is what lets `checks/behavior.nix` hand
   # in a shell-EXPANDABLE value like "$PWD/state" and have it resolve at RUNTIME inside the
   # build sandbox, rather than needing to guess a writable absolute path at eval time. Never
@@ -69,7 +69,7 @@ in
       # ── gate: freeze this tick entirely while the named check reads DOWN ────────────────
       # No probe run, no state write, no alert -- the gate's OWN check already alerted once
       # for the shared root cause. Generalizes the private implementation's single hardcoded
-      # "control probe" (a hub-egress sanity check gating every other fleet probe) into a
+      # "control probe" (a hub-egress sanity check gating every other host probe) into a
       # reusable relationship any check can declare against any other, so a shared root cause
       # (a dead network path, a dead cluster API) cannot fan out into every dependent check
       # paging independently for the same underlying reason.

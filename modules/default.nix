@@ -4,14 +4,14 @@
 # named checks, each with a probe (or, for a heartbeat, no probe at all), an interval, a
 # staleness deadline, a severity, and a nixpush channel to dispatch on.
 #
-# GENERALIZED FROM a private fleet's own `fleet-watchdog.nix`: a systemd-timer engine born
+# GENERALIZED FROM a private operator's own `fleet-watchdog.nix`: a systemd-timer engine born
 # from an incident where a live host memory-wedged overnight -- services dead, SSH dead --
-# and NOTHING noticed, because the fleet's metrics stack was deliberately disabled for RAM,
+# and NOTHING noticed, because the operator's metrics stack was deliberately disabled for RAM,
 # no uptime app existed, and the box that died also hosted the mail account any alert about
 # its own death would have to travel through. The fix that implementation landed on: probe
 # every plane from OUTSIDE the thing being watched, alert only on a state TRANSITION (not
 # every failing tick), and push a heartbeat unconditionally so silence itself becomes
-# detectable. This module is that mechanism, with the fleet-specific probe list, hostnames,
+# detectable. This module is that mechanism, with the operator-specific probe list, hostnames,
 # and delivery bespoke-queue logic all stripped out -- see README's "What changed vs. the
 # implementation this generalizes" for exactly what was cut and why.
 #
@@ -38,9 +38,9 @@
 #     module has no idea what a "provider" is, and never will.
 #   * It is not a metrics/observability stack. No time series, no Prometheus, no dashboard --
 #     one persisted UP/DOWN + last-known-good timestamp per check, nothing graphable.
-#   * It is not the POLICY of what any one estate watches. This repo ships the mechanism and
+#   * It is not the POLICY of what any one operator watches. This repo ships the mechanism and
 #     generic examples only; which checks exist, what their probes actually run, and which
-#     channels they page belongs in a private, per-estate configuration -- never in this repo.
+#     channels they page belongs in a private, per-operator configuration -- never in this repo.
 #   * It cannot detect its own death. A heartbeat check's `deadline` is a PROMISE folded into
 #     the beacon's own message text ("expect one at least every ..."), not an enforced value
 #     -- nixwatch's tick is what would have to notice a missed deadline, and a timer that has
