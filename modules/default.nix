@@ -4,16 +4,16 @@
 # named checks, each with a probe (or, for a heartbeat, no probe at all), an interval, a
 # staleness deadline, a severity, and a nixpush channel to dispatch on.
 #
-# GENERALIZED FROM a private operator's own `fleet-watchdog.nix`: a systemd-timer engine born
-# from an incident where a live host memory-wedged overnight -- services dead, SSH dead --
-# and NOTHING noticed, because the operator's metrics stack was deliberately disabled for RAM,
-# no uptime app existed, and the box that died also hosted the mail account any alert about
-# its own death would have to travel through. The fix that implementation landed on: probe
-# every plane from OUTSIDE the thing being watched, alert only on a state TRANSITION (not
-# every failing tick), and push a heartbeat unconditionally so silence itself becomes
-# detectable. This module is that mechanism, with the operator-specific probe list, hostnames,
-# and delivery bespoke-queue logic all stripped out -- see README's "What changed vs. the
-# implementation this generalizes" for exactly what was cut and why.
+# GENERALIZED FROM a private operator's own systemd-timer watchdog engine, born from an
+# incident where a host memory-wedged overnight -- every service on it, including SSH, went
+# unresponsive -- and NOTHING noticed, because nothing watching it was independent of it: the
+# alerting path itself depended on infrastructure that lived on the same box that had just gone
+# dark. The fix that implementation landed on: probe every plane from OUTSIDE the thing being
+# watched, alert only on a state TRANSITION (not every failing tick), and push a heartbeat
+# unconditionally so silence itself becomes detectable. This module is that mechanism, with the
+# operator-specific probe list, hostnames, and delivery bespoke-queue logic all stripped out --
+# see README's "What changed vs. the implementation this generalizes" for exactly what was cut
+# and why.
 #
 # WHAT THIS MODULE DOES:
 #   * Runs each declared check on ITS OWN systemd timer, at its own `interval`.

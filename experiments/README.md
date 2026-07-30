@@ -12,8 +12,8 @@ See the main [README](../README.md) for the project itself.
 ## Open questions worth an experiment, not yet run
 
 nixwatch v1 is a fresh scaffold, generalized out of one private implementation's own
-`fleet-watchdog.nix`. Every claim below is reasoned from that implementation's own history,
-not independently measured against a second, unrelated deployment.
+systemd-timer watchdog engine. Every claim below is reasoned from that implementation's own
+history, not independently measured against a second, unrelated deployment.
 
 ## 001 — is immediate, un-hysteresized recovery the right default?
 
@@ -39,7 +39,7 @@ the old failThreshold-style hysteresis would have produced on the same trace.
 
 **Status:** RESOLVED 2026-07-30, in the "make it available, don't force it" direction rather
 than "prove the simplification safe": a real deployment migrating onto this module (the
-private `fleet-watchdog.nix` this repo generalizes from) turned out to depend on its own
+private implementation this repo generalizes from) turned out to depend on its own
 symmetric recovery hysteresis in production, with a real page-vs-noise split riding on it --
 deleting that behavior silently, on the theory that it was "probably fine," is exactly the
 kind of regression that trains an operator to ignore alerts. `nixwatch.checks.<name>

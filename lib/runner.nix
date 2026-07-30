@@ -35,8 +35,8 @@ in
   #
   # `stateDir` and `nixpushCmd` are inserted into the generated script inside a single pair
   # of double quotes, UNESCAPED beyond that -- deliberately: this is the same convention the
-  # implementation this module generalizes (a private operator's own fleet-watchdog.nix) used
-  # for its own `STATE=${cfg.stateDir}/state`, and it is what lets `checks/behavior.nix` hand
+  # private implementation this module generalizes used for its own
+  # `STATE=${cfg.stateDir}/state`, and it is what lets `checks/behavior.nix` hand
   # in a shell-EXPANDABLE value like "$PWD/state" and have it resolve at RUNTIME inside the
   # build sandbox, rather than needing to guess a writable absolute path at eval time. Never
   # pass untrusted input as `stateDir` on a real host -- it is an operator-set module option,

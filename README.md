@@ -12,12 +12,12 @@ alert fires exactly once per state TRANSITION — a still-failing tick never re-
 still-healthy one never speaks at all.
 
 This repo, and the design it implements, is a generalization of one private operator's own
-`fleet-watchdog.nix`: a systemd-timer engine born from an incident where a live host
-memory-wedged overnight — services dead, SSH dead — and **nothing noticed**, because that
-operator's metrics stack was deliberately disabled for RAM, no uptime app existed, and the box
-that died also hosted the mail account any alert about its own death would have had to travel
-through. The fix that implementation landed on: probe every plane from OUTSIDE the thing
-being watched, alert only on a state transition, and push a heartbeat unconditionally so
+systemd-timer watchdog engine, born from an incident where a host memory-wedged overnight —
+every service on it, including SSH, went unresponsive — and **nothing noticed**, because
+nothing watching it was independent of it: the alerting path itself depended on infrastructure
+that lived on the same box that had just gone dark. The fix that implementation landed on:
+probe every plane from OUTSIDE the thing being watched, alert only on a state transition, and
+push a heartbeat unconditionally so
 silence itself becomes detectable rather than reading as "all clear" by default. This repo is
 that mechanism, with every operator-specific probe, hostname, and bespoke delivery-queue detail
 stripped out — see [What changed vs. the implementation this generalizes](#what-changed-vs-the-implementation-this-generalizes)
@@ -298,7 +298,7 @@ it fires when violated and stays silent when satisfied.
 are real and checked-in: a real per-check systemd service + timer pair, a real generated
 script proven (in `checks/behavior.nix`) to alert on transition only, freeze while gated, and
 beacon unconditionally for a heartbeat — not stubs. Extracted and generalized from one private
-operator's own `fleet-watchdog.nix`; see
+operator's own systemd-timer watchdog engine; see
 [What changed vs. the implementation this generalizes](#what-changed-vs-the-implementation-this-generalizes)
 for exactly what did not survive the generalization, and why.
 
