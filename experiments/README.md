@@ -37,7 +37,18 @@ genuinely flaky dependency.
 restarting on a tight loop) for an hour, count DOWN/RECOVERED pairs, and compare against what
 the old failThreshold-style hysteresis would have produced on the same trace.
 
-**Status:** open. No real flapping dependency has exercised this module yet.
+**Status:** RESOLVED 2026-07-30, in the "make it available, don't force it" direction rather
+than "prove the simplification safe": a real deployment migrating onto this module (the
+private `fleet-watchdog.nix` this repo generalizes from) turned out to depend on its own
+symmetric recovery hysteresis in production, with a real page-vs-noise split riding on it --
+deleting that behavior silently, on the theory that it was "probably fine," is exactly the
+kind of regression that trains an operator to ignore alerts. `nixwatch.checks.<name>
+.recoverAfter` (a real elapsed-time span, same grammar as `deadline`) now lets a check opt
+into the old symmetric behavior; the default stays immediate-flip, since the hypothesis above
+is still believed true for MOST checks and a needless recoverAfter only delays a genuine
+recovery's own alert. See `lib/runner.nix`'s recovery branch and
+`checks/behavior.nix`'s own `recoverAfter` proof (streak accumulation across ticks, and reset
+on a mid-streak failure) for the concrete implementation this closed to.
 
 ## 002 — does `gatedBy` need to support a chain, not just one hop?
 

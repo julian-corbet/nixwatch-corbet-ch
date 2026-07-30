@@ -45,6 +45,8 @@ in
     let
       timeoutSeconds = durationLib.toSeconds check.timeout;
       deadlineSeconds = durationLib.toSeconds check.deadline;
+      recoverAfterSeconds =
+        if check.recoverAfter != null then durationLib.toSeconds check.recoverAfter else null;
     in
     pkgs.writeShellScript "nixwatch-check-${name}" ''
       set -uo pipefail   # deliberately NO -e: a failing probe's own exit status is DATA (the
@@ -93,7 +95,7 @@ in
       send "ALIVE" "heartbeat (expect one at least every ${check.deadline})"
       echo "UP $now" > "$SF"
       exit 0
-      '' else ''
+      '' else if recoverAfterSeconds == null then ''
       # ── probe: alert-on-TRANSITION only, staleness measured in real elapsed time ─────────
       # Never a tick count: a systemd timer's own RandomizedDelaySec means "N consecutive
       # ticks" is not actually a fixed span of wall-clock time, but a persisted last-known-good
@@ -120,6 +122,55 @@ in
           fi
         else
           echo "DOWN $lastgood" > "$SF"   # still down; no repeat alert
+        fi
+      fi
+      '' else ''
+      # ── probe: alert-on-TRANSITION, with symmetric RECOVERY hysteresis ────────────────────
+      # A single success no longer flips DOWN -> UP by itself: the probe must keep succeeding
+      # continuously for recoverAfter (real elapsed time -- the same "measure time, not
+      # ticks" choice deadline already makes, never a consecutive-success COUNT) before this
+      # check is considered genuinely back up. Without this, a probe that flaps right around
+      # its own deadline boundary alerts DOWN/RECOVERED/DOWN/RECOVERED on every flap -- exactly
+      # the noise that trains whoever watches the channel to stop trusting, or stop reading,
+      # it. State file gains a third field while DOWN: the timestamp the current unbroken
+      # success streak began, cleared (by writing only two fields) the moment a probe fails
+      # again, so a flap never carries a stale partial streak into its next attempt.
+      st=UP; lastgood=$now; recovering_since=
+      if [ -f "$SF" ]; then read -r st lastgood recovering_since < "$SF" 2>/dev/null || { st=UP; lastgood=$now; recovering_since=; }; fi
+      case "''${lastgood:-}" in ""|*[!0-9]*) lastgood=$now;; esac
+      case "''${recovering_since:-}" in ""|*[!0-9]*) recovering_since=;; esac
+
+      if timeout ${toString timeoutSeconds} bash -c ${lib.escapeShellArg check.probe} >/dev/null 2>&1; then
+        if [ "$st" = DOWN ]; then
+          if [ -z "$recovering_since" ]; then
+            echo "DOWN $lastgood $now" > "$SF"
+            echo "nixwatch-check-${name}: recovering, 0s/${toString recoverAfterSeconds}s of recoverAfter elapsed -- not yet flipping UP"
+          else
+            recovered_for=$(( now - recovering_since ))
+            if [ "$recovered_for" -ge ${toString recoverAfterSeconds} ]; then
+              echo "UP $now" > "$SF"
+              down_for=$(( now - lastgood ))
+              send "RECOVERED" "back up (was down roughly ''${down_for}s, succeeded continuously for roughly ''${recovered_for}s)"
+            else
+              echo "DOWN $lastgood $recovering_since" > "$SF"
+              echo "nixwatch-check-${name}: recovering, ''${recovered_for}s/${toString recoverAfterSeconds}s of recoverAfter elapsed -- not yet flipping UP"
+            fi
+          fi
+        else
+          echo "UP $now" > "$SF"
+        fi
+      else
+        if [ "$st" = DOWN ]; then
+          echo "DOWN $lastgood" > "$SF"   # still down; any partial recovery streak resets
+        else
+          age=$(( now - lastgood ))
+          if [ "$age" -ge ${toString deadlineSeconds} ]; then
+            echo "DOWN $lastgood" > "$SF"
+            send "DOWN" "unhealthy for roughly ''${age}s (deadline ${toString deadlineSeconds}s)"
+          else
+            echo "UP $lastgood" > "$SF"
+            echo "nixwatch-check-${name}: fail, ''${age}s/${toString deadlineSeconds}s of deadline elapsed -- not yet alerting"
+          fi
         fi
       fi
       ''}

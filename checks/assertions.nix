@@ -83,17 +83,21 @@ in
     "expected a deadline shorter than its own interval to fail the build, but it succeeded")
 
   (check "checks/deadline-equal-to-interval-builds-fine"
-    (!(buildFails {
-      nixwatch.enable = true;
-      nixwatch.checks.example = validCheck // { interval = "5m"; deadline = "5m"; };
-    }))
+    (
+      !(buildFails {
+        nixwatch.enable = true;
+        nixwatch.checks.example = validCheck // { interval = "5m"; deadline = "5m"; };
+      })
+    )
     "a deadline exactly equal to interval should never fail the build on its own")
 
   (check "checks/deadline-longer-than-interval-builds-fine"
-    (!(buildFails {
-      nixwatch.enable = true;
-      nixwatch.checks.example = validCheck // { interval = "1m"; deadline = "5m"; };
-    }))
+    (
+      !(buildFails {
+        nixwatch.enable = true;
+        nixwatch.checks.example = validCheck // { interval = "1m"; deadline = "5m"; };
+      })
+    )
     "the base valid fixture (deadline > interval) should never fail the build on its own")
 
   # --- malformed durations, both fields, all three duration options -----------------------
@@ -119,10 +123,12 @@ in
     "expected an unparsable timeout to fail the build, but it succeeded")
 
   (check "checks/well-formed-durations-build-fine"
-    (!(buildFails {
-      nixwatch.enable = true;
-      nixwatch.checks.example = validCheck // { timeout = "10s"; };
-    }))
+    (
+      !(buildFails {
+        nixwatch.enable = true;
+        nixwatch.checks.example = validCheck // { timeout = "10s"; };
+      })
+    )
     "well-formed interval/deadline/timeout should never fail the build on their own")
 
   # --- kind = "probe" without a probe script ------------------------------------------------
@@ -134,11 +140,46 @@ in
     "expected kind = \"probe\" with no probe script to fail the build, but it succeeded")
 
   (check "checks/probe-kind-with-probe-builds-fine"
-    (!(buildFails {
-      nixwatch.enable = true;
-      nixwatch.checks.example = validCheck // { kind = "probe"; };
-    }))
+    (
+      !(buildFails {
+        nixwatch.enable = true;
+        nixwatch.checks.example = validCheck // { kind = "probe"; };
+      })
+    )
     "kind = \"probe\" with a probe script set should never fail the build on its own")
+
+  # --- recoverAfter: malformed duration, and forbidden under kind = "heartbeat" -----------
+  (check "checks/malformed-recoverAfter-fails-the-build"
+    (buildFails {
+      nixwatch.enable = true;
+      nixwatch.checks.example = validCheck // { recoverAfter = "banana"; };
+    })
+    "expected an unparsable recoverAfter to fail the build, but it succeeded")
+
+  (check "checks/well-formed-recoverAfter-builds-fine"
+    (
+      !(buildFails {
+        nixwatch.enable = true;
+        nixwatch.checks.example = validCheck // { recoverAfter = "10s"; };
+      })
+    )
+    "a well-formed recoverAfter should never fail the build on its own")
+
+  (check "checks/unset-recoverAfter-builds-fine"
+    (
+      !(buildFails {
+        nixwatch.enable = true;
+        nixwatch.checks.example = validCheck;
+      })
+    )
+    "leaving recoverAfter unset (null) should never fail the build -- it is the pre-existing, immediate-flip default")
+
+  (check "checks/heartbeat-kind-with-recoverAfter-set-fails-the-build"
+    (buildFails {
+      nixwatch.enable = true;
+      nixwatch.checks.example = builtins.removeAttrs validCheck [ "probe" ] // { kind = "heartbeat"; recoverAfter = "10s"; };
+    })
+    "expected kind = \"heartbeat\" with recoverAfter set to fail the build, but it succeeded")
 
   # --- kind = "heartbeat" must not also set probe -------------------------------------------
   (check "checks/heartbeat-kind-with-probe-set-fails-the-build"
@@ -149,10 +190,12 @@ in
     "expected kind = \"heartbeat\" with a probe script set to fail the build, but it succeeded")
 
   (check "checks/heartbeat-kind-without-probe-builds-fine"
-    (!(buildFails {
-      nixwatch.enable = true;
-      nixwatch.checks.example = builtins.removeAttrs validCheck [ "probe" ] // { kind = "heartbeat"; };
-    }))
+    (
+      !(buildFails {
+        nixwatch.enable = true;
+        nixwatch.checks.example = builtins.removeAttrs validCheck [ "probe" ] // { kind = "heartbeat"; };
+      })
+    )
     "kind = \"heartbeat\" with no probe script should never fail the build on its own")
 
   # --- gatedBy: self-reference, unknown reference, valid reference ------------------------
@@ -171,11 +214,13 @@ in
     "expected gatedBy naming an undeclared check to fail the build, but it succeeded")
 
   (check "checks/gatedby-valid-reference-builds-fine"
-    (!(buildFails {
-      nixwatch.enable = true;
-      nixwatch.checks.gate = validCheck;
-      nixwatch.checks.example = validCheck // { gatedBy = "gate"; };
-    }))
+    (
+      !(buildFails {
+        nixwatch.enable = true;
+        nixwatch.checks.gate = validCheck;
+        nixwatch.checks.example = validCheck // { gatedBy = "gate"; };
+      })
+    )
     "a check gated by another, real, declared check should never fail the build on its own")
 
   # --- channel: asserted against nixpush.channels ONLY when nixpush.enable is true ---------
@@ -188,23 +233,27 @@ in
     "expected an undeclared nixpush channel to fail the build when nixpush.enable = true, but it succeeded")
 
   (check "checks/declared-channel-builds-fine-when-nixpush-enabled"
-    (!(buildFailsWithNixpush {
-      nixpush.enable = true;
-      nixpush.channels.example = { };
-      nixwatch.enable = true;
-      nixwatch.checks.example = validCheck // { channel = "example"; };
-    }))
+    (
+      !(buildFailsWithNixpush {
+        nixpush.enable = true;
+        nixpush.channels.example = { };
+        nixwatch.enable = true;
+        nixwatch.checks.example = validCheck // { channel = "example"; };
+      })
+    )
     "a channel actually declared in nixpush.channels should never fail the build on its own")
 
   # --- the graceful, ungated path: nixpush not present in the composed system AT ALL --------
   (check "checks/unvalidated-channel-builds-fine-when-nixpush-absent"
-    (!(buildFails {
-      # evalNixwatch, not evalNixwatchWithNixpush: no nixpushStub anywhere in this
-      # composition, so `config.nixpush` does not exist as an option path at all -- proves
-      # the defensive read (`config.nixpush.enable or false`) degrades to "unchecked"
-      # rather than throwing an "attribute missing" error of its own.
-      nixwatch.enable = true;
-      nixwatch.checks.example = validCheck // { channel = "anything-at-all"; };
-    }))
+    (
+      !(buildFails {
+        # evalNixwatch, not evalNixwatchWithNixpush: no nixpushStub anywhere in this
+        # composition, so `config.nixpush` does not exist as an option path at all -- proves
+        # the defensive read (`config.nixpush.enable or false`) degrades to "unchecked"
+        # rather than throwing an "attribute missing" error of its own.
+        nixwatch.enable = true;
+        nixwatch.checks.example = validCheck // { channel = "anything-at-all"; };
+      })
+    )
     "a check's channel must never be validated against nixpush.channels when nixpush is not imported into the composed system at all")
 ]

@@ -146,6 +146,30 @@ let
         '';
       };
 
+      recoverAfter = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = ''
+          Symmetric recovery hysteresis: once a DOWN probe starts succeeding again, it must
+          keep succeeding continuously for this long (real elapsed time, same duration grammar
+          as `interval`/`deadline` -- never a consecutive-tick count) before this check
+          actually flips back to UP and alerts RECOVERED. `null` (the default) flips UP, and
+          alerts, on the very first success after a DOWN state -- unchanged from before this
+          option existed.
+
+          WHY THIS EXISTS: a probe that flaps right around its own `deadline` boundary
+          otherwise alerts DOWN/RECOVERED/DOWN/RECOVERED on every flap -- exactly the noise
+          that trains whoever watches the channel to stop trusting, or stop reading, it. Set
+          this on a check whose dependency is known to flap on recovery rather than come back
+          cleanly; leave it null on one that doesn't, since every set value delays a genuine,
+          clean recovery's own RECOVERED alert by this long, which is a real cost to pay only
+          where flapping is an actual, observed risk.
+
+          Forbidden when `kind = "heartbeat"` (asserted) -- a heartbeat has no UP/DOWN state
+          machine at all, so recovery hysteresis has nothing to apply to.
+        '';
+      };
+
       timeout = lib.mkOption {
         type = lib.types.str;
         default = "30s";
@@ -253,6 +277,8 @@ in
             intervalSeconds = durationLib.toSeconds check.interval;
             deadlineSeconds = durationLib.toSeconds check.deadline;
             timeoutSeconds = durationLib.toSeconds check.timeout;
+            recoverAfterSeconds =
+              if check.recoverAfter != null then durationLib.toSeconds check.recoverAfter else null;
           in
           [
             {
@@ -301,6 +327,23 @@ in
                 nixwatch.checks.${name} has kind = "heartbeat" but also sets probe -- a
                 heartbeat check ignores probe entirely at runtime (see `kind`'s own
                 description); leaving it set here can only mislead a future reader.
+              '';
+            }
+            {
+              assertion = check.recoverAfter == null || recoverAfterSeconds != null;
+              message = ''
+                nixwatch.checks.${name}.recoverAfter = "${toString check.recoverAfter}" does
+                not parse as a duration (same grammar as .interval -- see that option's own
+                error).
+              '';
+            }
+            {
+              assertion = check.kind != "heartbeat" || check.recoverAfter == null;
+              message = ''
+                nixwatch.checks.${name} has kind = "heartbeat" but also sets recoverAfter -- a
+                heartbeat has no UP/DOWN state machine at all (see `kind`'s own description),
+                so recovery hysteresis has nothing to apply to; leaving it set here can only
+                mislead a future reader.
               '';
             }
             {

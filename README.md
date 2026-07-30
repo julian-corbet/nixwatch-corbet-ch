@@ -56,9 +56,12 @@ Every check is one of:
   command's exit status is the verdict. A persisted last-known-good timestamp tracks real
   elapsed time, never a tick count (a systemd timer's own jitter means "N consecutive ticks"
   is not a fixed span of wall-clock time; a timestamp is). Once a failure has persisted past
-  `deadline`, the check flips DOWN and alerts exactly once; the next success flips it back to
-  UP and alerts RECOVERED exactly once. A tick that merely confirms the current state — still
-  failing, still healthy — never alerts again.
+  `deadline`, the check flips DOWN and alerts exactly once; by default the very next success
+  flips it back to UP and alerts RECOVERED exactly once. A tick that merely confirms the
+  current state — still failing, still healthy — never alerts again. Set `recoverAfter` on a
+  check whose dependency is known to flap on recovery: it must then succeed continuously for
+  that long (again real elapsed time) before actually flipping UP, so a flap right around
+  `deadline`'s own boundary cannot alert DOWN/RECOVERED/DOWN/RECOVERED on every cycle.
 - **`kind = "heartbeat"`.** No probe, no state machine, no up/down transitions — just an
   unconditional "I'm alive" beacon dispatched every `interval`, full stop. This is the
   dead-man's-switch shape: the one thing naive "alert on explicit failure" monitoring always
@@ -125,11 +128,17 @@ worse than one that never had it:
   span instead — the more portable, and the more honest, version of the same idea (comparable
   directly against `interval` at eval time, which is exactly what makes the "deadline shorter
   than interval can never pass" assertion possible at all — see `modules/default.nix`).
-- **No recovery hysteresis (yet).** The old engine required `failThreshold` consecutive
-  SUCCESSES before flipping back to UP, specifically to stop a flapping probe from paging on
-  every recovery blip. This module's probe branch flips UP (and alerts RECOVERED) on the very
-  first success after a DOWN state. See `experiments/README.md` #001 for why this
-  simplification is believed safe for most checks, and when it might not be.
+- **Recovery hysteresis is opt-in, not gone.** The old engine required `failThreshold`
+  consecutive SUCCESSES before flipping back to UP, specifically to stop a flapping probe
+  from paging on every recovery blip. This module's probe branch still flips UP (and alerts
+  RECOVERED) on the very first success after a DOWN state BY DEFAULT — but a check can set
+  `recoverAfter` (a real elapsed-time span, same duration grammar as `deadline`, never a
+  consecutive-tick count) to require that many seconds of UNBROKEN success before it actually
+  flips back to UP. A failure anywhere in that streak resets it — a flap never carries a
+  partial recovery into its next attempt. See `experiments/README.md` #001 for the reasoning
+  this default was originally shipped on, and why a real deployment (one whose recovery
+  hysteresis was load-bearing) is what motivated making it available rather than leaving it
+  purely eval-time-simpler.
 - **A composable `gatedBy`, not one hardcoded control probe.** See
   [Gates](#gates-one-root-cause-pages-once-not-once-per-dependent) above.
 - **Dispatch through nixpush, not a bespoke crash-safe delivery queue.** The old engine
@@ -138,7 +147,13 @@ worse than one that never had it:
   to nixpush's own domain now (or a future nixpush v2 daemon; see nixpush's own README), not
   duplicated here. `severity` maps onto nixpush's own `--priority`
   (info → low, warning → default, critical → urgent); it never invents its OWN delivery
-  preference logic on top.
+  preference logic on top. **This one is a genuine, not-yet-closed gap, unlike recovery
+  hysteresis above**: nixpush v1 is explicitly synchronous with no daemon and no persistent
+  queue (its own README's "Non-goals & future direction"), and has no concept of a
+  channel-with-fallback at all. A host retiring its own bespoke queue+fallback mechanism in
+  favor of nixwatch+nixpush should confirm first that it does not actually depend on either —
+  a `nixpush send` failure here is simply lost, once, not retried on a later tick the way the
+  old engine's queue would have.
 - **No gatus-specific (or any other vendor-specific) dead-man's-switch receiver.** The old
   engine pushed its own liveness directly to gatus, a specific in-cluster dashboard, with
   gatus's own `heartbeat.interval` closing the "did the watchdog itself die" loop. nixwatch's

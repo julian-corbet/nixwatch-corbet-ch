@@ -58,6 +58,7 @@ let
     probe = ''[ "$NIXWATCH_TEST_PROBE_OK" = "0" ]'';
     interval = "1s";
     deadline = "2s";
+    recoverAfter = null;
     timeout = "5s";
     severity = "warning";
     channel = "test";
@@ -71,6 +72,7 @@ let
     probe = null;
     interval = "1s";
     deadline = "1s";
+    recoverAfter = null;
     timeout = "5s";
     severity = "info";
     channel = "test";
@@ -87,6 +89,7 @@ let
     probe = "exit 1"; # ALWAYS fails -- proves it's the GATE freezing the tick, not the probe passing
     interval = "1s";
     deadline = "2s";
+    recoverAfter = null;
     timeout = "5s";
     severity = "warning";
     channel = "test";
@@ -94,11 +97,30 @@ let
     title = null;
   };
   gatedCheckScript = mkRunner "gated-check" gatedCheck;
+
+  # A probe check with symmetric RECOVERY hysteresis: recoverAfter = "10s" means a single
+  # success no longer flips DOWN -> UP by itself -- the probe must keep succeeding
+  # continuously for 10s (simulated the same way the deadline test below simulates elapsed
+  # time: rewriting the persisted state file's own timestamp backward, never a faked clock)
+  # before this check actually flips back to UP and alerts RECOVERED.
+  recoverCheck = {
+    kind = "probe";
+    probe = ''[ "$NIXWATCH_TEST_PROBE_OK" = "0" ]'';
+    interval = "1s";
+    deadline = "2s";
+    recoverAfter = "10s";
+    timeout = "5s";
+    severity = "warning";
+    channel = "test";
+    gatedBy = null;
+    title = null;
+  };
+  recoverCheckScript = mkRunner "recover-check" recoverCheck;
 in
 pkgs.runCommand "nixwatch-behavior-proof"
-  {
-    nativeBuildInputs = [ pkgs.coreutils pkgs.bash pkgs.gnugrep ];
-  }
+{
+  nativeBuildInputs = [ pkgs.coreutils pkgs.bash pkgs.gnugrep ];
+}
   ''
     set -euo pipefail
     export NIXWATCH_TEST_LOG="$PWD/nixpush.log"
@@ -187,6 +209,77 @@ pkgs.runCommand "nixwatch-behavior-proof"
     lastline | grep -q '^DOWN:' || fail "expected gated-check's own DOWN alert once unblocked, got: $(lastline)"
 
     echo "gate: freeze-while-down + resume-once-healthy PASSED"
+
+    # ── recoverAfter: symmetric recovery hysteresis, real elapsed time ──────────────────
+    : > "$NIXWATCH_TEST_LOG"
+    rm -f "$PWD/state/recover-check"
+
+    export NIXWATCH_TEST_PROBE_OK=0
+    ${recoverCheckScript}
+    [ "$(count)" -eq 0 ] || fail "recover-check: a healthy first tick must never alert (got $(count))"
+
+    # Drive it DOWN exactly like the plain probe-check proof above: fail, then simulate
+    # crossing the 2s deadline by rewriting lastgood backward.
+    export NIXWATCH_TEST_PROBE_OK=1
+    ${recoverCheckScript}
+    [ "$(count)" -eq 0 ] || fail "recover-check: a failure still within its own deadline must not alert yet"
+    read -r _ rLastgood < "$PWD/state/recover-check"
+    echo "UP $(( rLastgood - 10 ))" > "$PWD/state/recover-check"
+    ${recoverCheckScript}
+    [ "$(count)" -eq 1 ] || fail "recover-check: crossing its own deadline must alert exactly once (got $(count))"
+    lastline | grep -q '^DOWN:' || fail "expected recover-check's own DOWN alert, got: $(lastline)"
+
+    # First success after DOWN: with recoverAfter set, this must NOT flip UP and must NOT
+    # alert -- it only starts the recovery streak.
+    export NIXWATCH_TEST_PROBE_OK=0
+    ${recoverCheckScript}
+    [ "$(count)" -eq 1 ] || fail "recover-check: the FIRST success after DOWN must not alert yet with recoverAfter set (got $(count), expected still 1)"
+    read -r rSt _ rSince < "$PWD/state/recover-check"
+    [ "$rSt" = "DOWN" ] || fail "recover-check: state must stay DOWN through the recovery streak, got $rSt"
+    [ -n "''${rSince:-}" ] || fail "recover-check: expected a recovering-since timestamp to be persisted once a success streak starts"
+
+    # A second success arriving almost immediately (real elapsed time far short of the 10s
+    # recoverAfter) must ALSO not flip UP yet, and must carry the SAME recovering-since
+    # timestamp forward rather than resetting the streak's start on every tick.
+    ${recoverCheckScript}
+    [ "$(count)" -eq 1 ] || fail "recover-check: still-recovering ticks must not alert (got $(count), expected still 1)"
+    read -r _ _ rSince2 < "$PWD/state/recover-check"
+    [ "$rSince2" = "$rSince" ] || fail "recover-check: recovering-since must not reset on a later still-recovering success (was $rSince, now $rSince2)"
+
+    # Simulate recoverAfter (10s) having actually elapsed: push recovering-since backward.
+    echo "DOWN $rLastgood $(( rSince - 15 ))" > "$PWD/state/recover-check"
+    ${recoverCheckScript}
+    [ "$(count)" -eq 2 ] || fail "recover-check: once recoverAfter has elapsed, the next success must flip UP and alert exactly once (got $(count))"
+    lastline | grep -q '^RECOVERED:' || fail "expected recover-check's own RECOVERED alert, got: $(lastline)"
+    read -r rSt2 _ < "$PWD/state/recover-check"
+    [ "$rSt2" = "UP" ] || fail "recover-check: state must flip to UP once recoverAfter has elapsed"
+
+    echo "recoverAfter: symmetric recovery hysteresis PASSED"
+
+    # ── recoverAfter: a FAILURE mid-streak resets the partial recovery, never carries over ──
+    : > "$NIXWATCH_TEST_LOG"
+    rm -f "$PWD/state/recover-check"
+
+    export NIXWATCH_TEST_PROBE_OK=1
+    ${recoverCheckScript}                                # first failing tick: within deadline
+    read -r _ rLastgood2 < "$PWD/state/recover-check"
+    echo "UP $(( rLastgood2 - 10 ))" > "$PWD/state/recover-check"
+    ${recoverCheckScript}                                # crosses deadline -> DOWN
+    [ "$(count)" -eq 1 ] || fail "recover-check/flap: expected exactly one DOWN alert before the flap, got $(count)"
+
+    export NIXWATCH_TEST_PROBE_OK=0
+    ${recoverCheckScript}                                # one success: starts a recovery streak
+    read -r _ _ rSince3 < "$PWD/state/recover-check"
+    [ -n "''${rSince3:-}" ] || fail "recover-check/flap: expected a recovering-since timestamp after the first success"
+
+    export NIXWATCH_TEST_PROBE_OK=1
+    ${recoverCheckScript}                                # fails again BEFORE recoverAfter elapses: must reset the streak
+    [ "$(count)" -eq 1 ] || fail "recover-check/flap: a failure mid-streak must not itself alert (still-DOWN, got $(count))"
+    read -r rSt3 _ rSince4 < "$PWD/state/recover-check"
+    [ "$rSt3" = "DOWN" ] || fail "recover-check/flap: must remain DOWN after failing mid-streak"
+    [ -z "''${rSince4:-}" ] || fail "recover-check/flap: a failure mid-streak must clear the recovering-since timestamp, not carry it forward (got $rSince4)"
+
+    echo "recoverAfter: mid-streak failure resets the partial recovery PASSED"
 
     touch $out
   ''
