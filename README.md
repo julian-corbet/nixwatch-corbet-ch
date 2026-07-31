@@ -144,18 +144,14 @@ worse than one that never had it:
 - **Dispatch through nixpush, not a bespoke crash-safe delivery queue.** The old engine
   carried its own persistent undelivered-alert queue, poison-4xx handling, and a dedicated
   paging-topic-with-fallback preference — real delivery-reliability engineering that belongs
-  to nixpush's own domain now (or a future nixpush v2 daemon; see nixpush's own README), not
-  duplicated here. `severity` maps onto nixpush's own `--priority`
+  to nixpush's own domain, not duplicated here. `severity` maps onto nixpush's own `--priority`
   (info → low, warning → default, critical → urgent); it never invents its OWN delivery
-  preference logic on top. **CLOSED 2026-07-30 — this was a genuine gap and is no longer one.**
-  nixpush gained both halves, opt-in per channel: `durable` (a crash-safe on-disk spool, flushed
-  oldest-first by a one-shot timer, with poison messages moved aside so one permanently-rejected
-  alert cannot wedge the queue behind it) and `fallback` (degrade to another channel, engaged on an
-  unseal failure or a hard rejection but deliberately NOT on a transient failure, since retrying is
-  the right answer there and falling back would hide a recoverable fault behind a downgraded
-  alert). A host retiring its own bespoke queue therefore no longer loses those guarantees — but it
-  must set `durable` and `fallback` explicitly on the channel it cares about, because both default
-  to off so that nixpush stays a thin one-shot for everyone who never asked for a queue.
+  preference logic on top. nixpush offers the same guarantees opt-in, per channel: `durable`
+  (a crash-safe on-disk spool, poison messages moved aside so one permanently-rejected alert
+  cannot wedge the queue behind it) and `fallback` (degrade to another channel on a hard
+  rejection, never on a transient failure, since retrying is the right answer there). Both
+  default to off, so nixpush stays a thin one-shot for a channel that never asked for a queue —
+  set them explicitly on any channel that needs them.
 - **No gatus-specific (or any other vendor-specific) dead-man's-switch receiver.** The old
   engine pushed its own liveness directly to gatus, a specific in-cluster dashboard, with
   gatus's own `heartbeat.interval` closing the "did the watchdog itself die" loop. nixwatch's
