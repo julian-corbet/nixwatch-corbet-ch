@@ -47,6 +47,23 @@ in
       deadlineSeconds = durationLib.toSeconds check.deadline;
       recoverAfterSeconds =
         if check.recoverAfter != null then durationLib.toSeconds check.recoverAfter else null;
+
+      # `-k <grace>`, not plain `timeout <timeout>`: coreutils' `timeout` sends its signal
+      # (TERM) once at the deadline and then WAITS for the child to actually exit -- if the
+      # probe is blocked somewhere TERM cannot immediately unblock (a caught/ignored handler,
+      # or a syscall against a wedged FUSE/network mount that only becomes interruptible once
+      # its own transport notices something is wrong -- exactly the "mounted but the session
+      # behind it died" shape a probe checking a cloud/network mount exists to catch),
+      # `timeout` itself does not return either, and the mechanism meant to bound a hang has
+      # no bound of its own. `-k` re-sends KILL after this many more seconds if the child is
+      # still there, which a caught/ignored TERM cannot itself survive. This mirrors
+      # nixshare's own `nixshare-health` probe (`timeout -k 5 "$probe_timeout" ...`),
+      # independently arrived at for the identical failure shape in a sibling repo; its own
+      # header states the one honest limit that carries over here too -- a syscall parked in
+      # a genuinely UNINTERRUPTIBLE kernel wait cannot be freed by any signal, KILL included,
+      # until the kernel itself returns it, so this bounds every recoverable hang, not
+      # literally all of them.
+      killAfterSeconds = 5;
     in
     pkgs.writeShellScript "nixwatch-check-${name}" ''
       set -uo pipefail   # deliberately NO -e: a failing probe's own exit status is DATA (the
@@ -104,7 +121,7 @@ in
       if [ -f "$SF" ]; then read -r st lastgood < "$SF" 2>/dev/null || { st=UP; lastgood=$now; }; fi
       case "''${lastgood:-}" in ""|*[!0-9]*) lastgood=$now;; esac
 
-      if timeout ${toString timeoutSeconds} bash -c ${lib.escapeShellArg check.probe} >/dev/null 2>&1; then
+      if timeout -k ${toString killAfterSeconds} ${toString timeoutSeconds} bash -c ${lib.escapeShellArg check.probe} >/dev/null 2>&1; then
         echo "UP $now" > "$SF"
         if [ "$st" = DOWN ]; then
           down_for=$(( now - lastgood ))
@@ -140,7 +157,7 @@ in
       case "''${lastgood:-}" in ""|*[!0-9]*) lastgood=$now;; esac
       case "''${recovering_since:-}" in ""|*[!0-9]*) recovering_since=;; esac
 
-      if timeout ${toString timeoutSeconds} bash -c ${lib.escapeShellArg check.probe} >/dev/null 2>&1; then
+      if timeout -k ${toString killAfterSeconds} ${toString timeoutSeconds} bash -c ${lib.escapeShellArg check.probe} >/dev/null 2>&1; then
         if [ "$st" = DOWN ]; then
           if [ -z "$recovering_since" ]; then
             echo "DOWN $lastgood $now" > "$SF"

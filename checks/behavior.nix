@@ -116,6 +116,28 @@ let
     title = null;
   };
   recoverCheckScript = mkRunner "recover-check" recoverCheck;
+
+  # A probe that ignores its first signal entirely -- `trap "" TERM` sets TERM to SIG_IGN at
+  # the process level, which (unlike a caught handler) SURVIVES `exec`, so the `sleep` that
+  # replaces this shell inherits the ignore too. This is not an exotic uninterruptible-kernel-
+  # wait scenario -- it is the ordinary, easily-reached case of a probe (or whatever it shells
+  # out to) that merely does not react to a plain TERM. `timeout 30` sleeping for real proves
+  # the point empirically: `timeout <n> bash -c 'trap "" TERM; exec sleep 30'` does not return
+  # in `<n>` seconds, it returns after the full 30 -- the exact "the mechanism meant to bound
+  # a hang has no bound of its own" failure `lib/runner.nix`'s own comment on `-k` describes.
+  hangCheck = {
+    kind = "probe";
+    probe = ''trap "" TERM; exec sleep 30'';
+    interval = "1s";
+    deadline = "2s";
+    recoverAfter = null;
+    timeout = "2s";
+    severity = "warning";
+    channel = "test";
+    gatedBy = null;
+    title = null;
+  };
+  hangCheckScript = mkRunner "hang-check" hangCheck;
 in
 pkgs.runCommand "nixwatch-behavior-proof"
 {
@@ -280,6 +302,23 @@ pkgs.runCommand "nixwatch-behavior-proof"
     [ -z "''${rSince4:-}" ] || fail "recover-check/flap: a failure mid-streak must clear the recovering-since timestamp, not carry it forward (got $rSince4)"
 
     echo "recoverAfter: mid-streak failure resets the partial recovery PASSED"
+
+    # ── a probe that ignores TERM must still be reclaimed, not hang the tick itself ────────
+    # hang-check's own `timeout` is 2s; `killAfterSeconds` in lib/runner.nix is a fixed 5s.
+    # A probe that merely ignores its first signal (see hangCheck's own comment -- this is
+    # NOT the unfixable D-state case, it is the ordinary one) must be reclaimed within
+    # roughly timeout+killAfter, and must stay FAR under the probe's own 30s sleep -- the
+    # only way this bound can be met at all is if the probe was actually killed, never
+    # merely waited out.
+    : > "$NIXWATCH_TEST_LOG"
+    rm -f "$PWD/state/hang-check"
+
+    hang_start=$(date +%s)
+    ${hangCheckScript}
+    hang_elapsed=$(( $(date +%s) - hang_start ))
+    [ "$hang_elapsed" -lt 20 ] || fail "a probe that ignores TERM must be reclaimed by the kill-after grace well inside its own 30s sleep (took ''${hang_elapsed}s -- the kill-after grace is not doing its job)"
+
+    echo "hang safety: a TERM-ignoring probe is reclaimed within timeout+kill-after, not waited out (''${hang_elapsed}s) PASSED"
 
     touch $out
   ''

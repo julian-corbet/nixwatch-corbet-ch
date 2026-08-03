@@ -207,6 +207,20 @@ nixwatch.checks.example-api = {
   title = "example API";
 };
 
+# A mount unit reporting `active` is not proof it actually answers -- a network/FUSE session
+# can die underneath an established mount and leave every filesystem call hanging instead of
+# erroring, which `systemctl is-active` alone reads as healthy forever. Same probe primitive
+# as example-api above; only the one-line snippet differs.
+nixwatch.checks.example-mount = {
+  probe = ''systemctl is-active --quiet example-mount.service && stat /mnt/example >/dev/null'';
+  interval = "10m";
+  deadline = "30m";
+  timeout = "20s";
+  severity = "warning";
+  channel = "ops-noise";
+  title = "example mount";
+};
+
 # The dead-man's-switch shape: a receiver watching "ops-noise" for silence longer than 15
 # minutes is what actually closes this loop -- nixwatch only emits the beacon.
 nixwatch.checks.example-watchdog-alive = {
@@ -239,14 +253,20 @@ UP 1785412860
 - `checks.<name>.kind` — `"probe"` (default) or `"heartbeat"`; see
   [The two check shapes](#the-two-check-shapes) above.
 - `checks.<name>.probe` — shell snippet, last command's exit status is the verdict. Required
-  for `kind = "probe"`, forbidden for `kind = "heartbeat"` (both asserted). Runs under
-  `timeout <timeout>`, never under `set -e`.
+  for `kind = "probe"`, forbidden for `kind = "heartbeat"` (both asserted). The generic
+  vehicle for any liveness question — an HTTP/TCP endpoint or a mount that reports itself
+  active without actually answering are both ordinary probes (see the option's own
+  description in `modules/default.nix` for a worked mount example). Runs under
+  `timeout -k 5s <timeout>`, never under `set -e`.
 - `checks.<name>.interval` / `.deadline` / `.timeout` — plain durations (`"30s"`/`"5m"`/
   `"2h"`/`"1d"`/a bare integer of seconds; see `lib/duration.nix`). `deadline` must never be
   shorter than `interval` (asserted, both directions — see
   [The one non-negotiable assertion](#the-one-non-negotiable-assertion) below). `timeout`
   bounds one run of `probe` (default `"30s"`; unused but still validated for `kind =
-  "heartbeat"`).
+  "heartbeat"`) — enforced with a 5s kill-after grace (`lib/runner.nix`), not a plain
+  `timeout`, because a probe that merely catches or ignores the first signal can otherwise
+  make `timeout` itself wait past its own deadline (proven in `checks/behavior.nix`'s
+  `hangCheck`).
 - `checks.<name>.severity` — `"info"` / `"warning"` (default) / `"critical"`; maps onto
   nixpush's own `--priority` (low / default / urgent respectively) and is folded into the
   alert title.

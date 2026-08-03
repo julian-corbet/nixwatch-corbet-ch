@@ -109,11 +109,20 @@ let
           permanent false "all clear", exactly the failure this whole module exists to
           prevent. Forbidden when `kind = "heartbeat"` (asserted) -- a heartbeat ignores this
           field entirely at runtime, so setting it here can only mislead whoever reads this
-          configuration into believing it is evaluated. Runs under `timeout <timeout>`, never
-          under `set -e` (a nonzero exit here is the verdict, not an engine crash) -- reference
-          any tool this snippet needs by absolute Nix store path (`${pkgs.curl}/bin/curl`,
-          not bare `curl`), the same convention the implementation this module generalizes
-          used for its own probes.
+          configuration into believing it is evaluated. Runs under `timeout -k 5s <timeout>`
+          (see `timeout`'s own description for why the kill-after grace matters), never under
+          `set -e` (a nonzero exit here is the verdict, not an engine crash) -- reference any
+          tool this snippet needs by absolute Nix store path (`${pkgs.curl}/bin/curl`, not
+          bare `curl`), the same convention the implementation this module generalizes used
+          for its own probes.
+
+          This is the generic vehicle for ANY liveness question, not just plain reachability
+          -- an HTTP/TCP endpoint (`curl -sf --max-time N http://...`, `nc -z -w N host port`)
+          and a mount that reports itself active without actually answering (`systemctl
+          is-active --quiet <unit> && stat <mountpoint>`, the "unit active is not proof the
+          mount is usable" shape a frozen FUSE/network session produces) are both ordinary
+          probes; neither needs its own check `kind` here, since the only thing that varies
+          between them is the one-line shell snippet.
         '';
       };
 
@@ -182,6 +191,12 @@ let
           `kind = "heartbeat"` (there is no probe to bound), but still required to parse as a
           valid duration regardless of `kind`, for the same reason every duration field here
           is validated uniformly rather than only when it happens to matter this run.
+
+          Enforced as `timeout -k 5s <timeout> bash -c '<probe>'`, never a plain
+          `timeout <timeout>` -- see `lib/runner.nix`'s own comment on why the kill-after
+          grace is load-bearing: a probe that merely catches or cannot immediately act on the
+          first signal can otherwise make `timeout` itself wait past its own deadline, which
+          defeats the one option that exists to guarantee this check's tick returns promptly.
         '';
       };
 

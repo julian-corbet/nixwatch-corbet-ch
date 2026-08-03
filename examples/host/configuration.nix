@@ -27,6 +27,20 @@
       title = "example API";
     };
 
+    # A mount that reports itself `active` is not proof it actually answers -- a network/FUSE
+    # session can die underneath an established mount and leave every filesystem call hanging
+    # instead of erroring, which `systemctl is-active` alone reads as healthy forever. Same
+    # `probe` primitive as example-api above; the only difference is the one-line snippet.
+    example-mount = {
+      probe = ''systemctl is-active --quiet example-mount.service && stat /mnt/example >/dev/null'';
+      interval = "10m";
+      deadline = "30m";
+      timeout = "20s";
+      severity = "warning";
+      channel = "ops-noise";
+      title = "example mount";
+    };
+
     # A shared precondition: if egress itself is down, example-api failing is not new
     # information -- it is gated below instead of paging independently.
     example-egress = {
