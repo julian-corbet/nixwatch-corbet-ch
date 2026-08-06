@@ -9,11 +9,17 @@
 #   PURE FUNCTION tests (checks/duration.nix, folded into the same `eval-tests`): no NixOS
 #   eval anywhere -- `lib/duration.nix`'s `toSeconds` is a plain function, tested as one.
 #
+#   checks/liveness-assertions.nix (also folded into `eval-tests`): the same eval-time
+#   assertion shape as checks/assertions.nix, for `modules/liveness.nix`'s own option surface
+#   (`nixwatch.liveness.*`) instead of `nixwatch.checks.*`.
+#
 #   A BUILD-LEVEL behavioral proof (checks/behavior.nix, exported separately as
 #   `behavior-proof`): the one thing this repo has that an eval-only test cannot see --
 #   `lib/runner.nix`'s generated script's actual, repeated-invocation, stateful behavior.
 #   See that file's own header for why it calls the plain builder function directly rather
-#   than going through a NixOS eval-config.
+#   than going through a NixOS eval-config. checks/liveness-behavior.nix (exported separately
+#   as `liveness-behavior-proof`) is the same idea for `lib/liveness.nix`'s generated
+#   `nixwatch-is-it-live` script.
 #
 # PLUS `modules-evaluate`: the composed-host check (examples/host/configuration.nix), the
 # same "every real, implemented option, once" shape nixstorage's own checks/default.nix uses.
@@ -24,8 +30,11 @@ let
   assertionResults = import ./assertions.nix {
     inherit pkgs lib nixpkgs system nixwatchModule;
   };
+  livenessAssertionResults = import ./liveness-assertions.nix {
+    inherit pkgs lib nixpkgs system nixwatchModule;
+  };
 
-  results = durationResults ++ assertionResults;
+  results = durationResults ++ assertionResults ++ livenessAssertionResults;
 
   failed = builtins.filter (r: !r.ok) results;
   report = lib.concatMapStringsSep "\n" (r: "  - ${r.name}: ${r.detail}") failed;
@@ -65,4 +74,5 @@ in
 {
   inherit eval-tests modules-evaluate;
   behavior-proof = import ./behavior.nix { inherit pkgs lib system; };
+  liveness-behavior-proof = import ./liveness-behavior.nix { inherit pkgs lib system; };
 }

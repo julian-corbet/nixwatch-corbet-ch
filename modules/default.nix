@@ -257,6 +257,13 @@ let
   });
 in
 {
+  # nixwatch.liveness.* -- the consumer side, "is this actually live per host" -- lives in its
+  # own file (modules/liveness.nix) and is pulled in here so `nixosModules.nixwatch` (this
+  # file, flake.nix's own single entry point) stays the one thing a consumer ever needs to
+  # import; see that file's own header for why it is a separate option surface from
+  # `nixwatch.checks.*` rather than a third check `kind`.
+  imports = [ ./liveness.nix ];
+
   options.nixwatch = {
     enable = lib.mkEnableOption "nixwatch liveness checks (probe/heartbeat + alert-on-transition, dispatched via nixpush)";
 

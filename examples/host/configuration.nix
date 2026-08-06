@@ -79,6 +79,43 @@
     };
   };
 
+  # nixwatch.liveness -- the CONSUMER side, "is this actually live" per host: which nix*
+  # modules are enabled, whether their units are actually running, and whether their own
+  # verify/health artifact is fresh, distinguishing UNKNOWN from healthy. See README's
+  # "is-it-live" section for the full picture; every real, implemented option below is
+  # exercised at least once, same convention as the checks above.
+  nixwatch.liveness.enable = true;
+  nixwatch.liveness.interval = "5m";
+
+  nixwatch.liveness.subjects = {
+    # A module whose own health document nixwatch reads directly (nixnet's own
+    # HEALTH-1/HEALTH-2 shape: one shared validUntil, one state per domain).
+    example-net = {
+      moduleEnabled = true; # stand-in for e.g. `config.nixnet.enable or false`
+      units = [ "example-netd.service" ];
+      healthFile = "/run/example-net/health.json";
+      healthDomain = "firewall";
+      title = "example network daemon";
+    };
+
+    # A module verified once at boot (nixboot-verify's own shape): no on-disk artifact of its
+    # own, just a oneshot's own exit code, judged fresh only if it ran THIS boot.
+    example-boot = {
+      moduleEnabled = true; # stand-in for e.g. `config.nixboot.verify.enable or false`
+      verifyUnit = "example-boot-verify.service";
+      title = "example boot verify";
+    };
+
+    # A module that is simply off on this host -- reported DISABLED, and never queried for
+    # units or freshness at all (an off module having no running units is expected, not a
+    # finding).
+    example-unused = {
+      moduleEnabled = false;
+      units = [ "example-unused.service" ];
+      title = "example unused module";
+    };
+  };
+
   # ── Stubs NixOS demands of any bootable system ───────────────────────────
   # tmpfs on / could never boot a real machine, which is the point: this
   # config exists to type-check the module, not to describe hardware.

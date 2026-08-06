@@ -113,6 +113,116 @@ system entirely, and with it present but the named channel missing — see
 `checks/assertions.nix`'s own `checks/undeclared-channel-*`/`checks/unvalidated-channel-*`
 entries.
 
+## is-it-live: the consumer side, per host
+
+A probe check answers "did the last tick of ONE liveness question succeed" — which is exactly
+the wrong shape for a different, equally real failure: a publisher that runs every 60 seconds
+for days, signed and green on every tick, into zero receivers. Nothing about that publisher's
+own probe ever fails — it is doing precisely what it was told to do — so a check watching IT
+would stay green the entire time. The gap is one level up: nobody ever asked whether the thing
+its output was supposed to reach still exists at all. `nixwatch.liveness` is that question,
+asked per host, per declared **subject** (typically one nix* module's own domain): is the
+module even enabled, are the systemd units it depends on actually active right now, and — the
+part a green unit cannot answer on its own — is that subsystem's OWN verify or health artifact
+actually FRESH, not merely present.
+
+This reads three things per subject, and reports one of five states — `FRESH`, `DOWN`,
+`STALE`, `UNKNOWN`, `DISABLED` — never collapsing the middle three into either end:
+
+- **`moduleEnabled`**, handed in by the operator's own configuration.nix (typically
+  `config.nixnet.enable or false`) — nixwatch never imports nixnet, nixboot, or any other nix*
+  module as a flake input, the same house rule this repo already applies to nixpush (see
+  above), so it has no way to read this value itself. A subject whose module is disabled is
+  reported `DISABLED` and nothing else about it is ever queried — an off module having no
+  running units is expected, not a finding.
+- **`units`**, checked with `systemctl is-active` — necessary, never sufficient, for the same
+  reason a check's own `probe` doc gives for a FUSE/network mount: a unit reporting `active` is
+  not proof it actually answers.
+- **One of `healthFile` or `verifyUnit`** (mutually exclusive — a subject has exactly one way
+  of proving its own freshness), each reading an EXISTING primitive rather than reinventing
+  one:
+  - `healthFile` reads nixnet's own health-document shape (BEHAVIORS.md `HEALTH-1`/`HEALTH-2`):
+    a JSON document with one shared top-level `validUntil`, and — via `healthDomain` — an
+    optional `.subjects.<domain>.state` breakdown for a document reporting more than one
+    domain under that one expiry. Absent, unreadable, or expired all read as `UNKNOWN` or
+    `STALE`, never as fresh; a document whose OWN domain reports red is `DOWN` even while its
+    `validUntil` is still comfortably in the future (`HEALTH-3`: a healthy expiry is not the
+    same claim as a healthy subject).
+  - `verifyUnit` reads nixboot-verify's own convention: a oneshot systemd unit,
+    `RemainAfterExit = true`, whose own exit code is the verdict and which persists no
+    artifact of its own. A boot-once unit has no `validUntil` to read, so freshness here means
+    "ran and passed THIS boot" — its own `ExecMainStartTimestamp` compared against the current
+    boot's own `UserspaceTimestamp`. A unit that last ran before this boot (masked, disabled,
+    or a condition that failed silently) reads `STALE`, not fresh-by-a-stale-success.
+  - Neither set: `UNKNOWN`, on purpose. A subject with only `units` declared has proven systemd's
+    own opinion and nothing else — that is real information, and it is not the same claim as
+    "verified fresh," so it is never printed as one.
+
+Each subject prints one line — `STATE   title: detail`, e.g. `DOWN     example network daemon:
+unit(s) not active: example-netd.service=failed` — the same PASS/FAIL/SKIP-line shape
+nixboot-verify already uses, deliberately not a fourth report format; run
+`systemctl status nixwatch-is-it-live` (or `journalctl -u nixwatch-is-it-live`) on any host with
+`nixwatch.liveness.enable = true` to read the last one.
+
+`config` below is the module system's own — this snippet, unlike the plain attribute-set
+Quickstart above, needs to live inside a module that receives it (`{ config, ... }: { ... }`),
+since `moduleEnabled` and `nixwatch.liveness.package` both read it back:
+
+```nix
+nixwatch.liveness.enable = true;
+nixwatch.liveness.interval = "5m";
+
+nixwatch.liveness.subjects.nixnet = {
+  moduleEnabled = config.nixnet.enable or false;
+  units = [ "nixnetd.service" ];
+  healthFile = "/run/nixnet/health.json";
+  healthDomain = "firewall";
+  title = "nixnet";
+};
+
+nixwatch.liveness.subjects.nixboot = {
+  moduleEnabled = config.nixboot.verify.enable or false;
+  verifyUnit = "nixboot-verify.service";
+  title = "nixboot verify";
+};
+```
+
+**This is not a second alerting engine.** `nixwatch-is-it-live`'s own exit code is
+three-way, deliberately: `0` when every enabled subject read `FRESH`; `1` when at least one
+read `DOWN` or `STALE` — decisive, known-bad evidence; `2` when nothing is `DOWN`/`STALE` but
+at least one subject read `UNKNOWN` — nothing is provably broken, and nothing has proven itself
+alive either, which is exactly the zero-receivers state this section opened with. Wire it
+through the SAME check mechanism every other liveness question already uses (see
+[The two check shapes](#the-two-check-shapes) above — this is nothing more than one more probe
+whose snippet happens to be a bigger question):
+
+```nix
+nixwatch.checks.is-it-live = {
+  # `[ $? -eq 0 ]`: page on UNKNOWN exactly like a genuine DOWN -- the conservative default.
+  # `[ $? -ne 1 ]` instead accepts UNKNOWN as tolerable and pages only on decisive badness;
+  # that choice belongs to whoever wires this check, never to nixwatch-is-it-live itself.
+  probe = "${config.nixwatch.liveness.package}/bin/nixwatch-is-it-live; [ $? -eq 0 ]";
+  interval = "5m";
+  deadline = "15m";
+  severity = "critical";
+  channel = "ops-page";
+  title = "is-it-live";
+};
+```
+
+`nixwatch.liveness.package` (not a bare `nixwatch-is-it-live`, even though it is also on
+`environment.systemPackages` for interactive use) is deliberate: a systemd oneshot's own
+default PATH is a curated minimal list, not `/run/current-system/sw/bin` — see
+`modules/liveness.nix`'s own header, and nixboot-verify's, for the measured reason a bare
+command name inside a generated script's `probe` is not trustworthy.
+
+**What this does not do:** it is not a fleet dashboard (one host, one report — a reader that
+wants to render many hosts at once is, same as `HEALTH-2`, a READER's job, never this
+module's), and it cannot discover subjects on its own (`moduleEnabled` must be handed in; see
+above). It also inherits `HEALTH-2`'s own honest limit one level further down: a `healthFile`
+this module reads is only ever as trustworthy as whatever wrote it — nixwatch can tell you a
+document is stale or absent, never that a present, fresh-looking one is lying.
+
 ## What changed vs. the implementation this generalizes
 
 Stated plainly, because a generalization that quietly drops behavior without saying so is
@@ -280,6 +390,30 @@ UP 1785412860
 - `checks.<name>.title` — human label folded into the alert/beacon title in place of the raw
   check name. `null` (default) uses the check name as-is.
 
+`nixwatch.liveness.*` (`modules/liveness.nix`; see [is-it-live](#is-it-live-the-consumer-side-per-host)
+above for the full picture):
+
+- `enable` — install `nixwatch-is-it-live.service`/`.timer` and the report script itself.
+- `interval` (default `"5m"`) — how often the survey re-runs; same duration grammar as
+  `checks.<name>.interval`. Also runs once at boot.
+- `subjects.<name>.moduleEnabled` — whether this subject's own nix* module is enabled on this
+  host, handed in from the operator's own config (e.g. `config.nixnet.enable or false`); never
+  read by nixwatch itself.
+- `subjects.<name>.units` — systemd unit names expected `active` while `moduleEnabled` is true.
+- `subjects.<name>.healthFile` / `.healthDomain` — path to a JSON document in nixnet's own
+  HEALTH-1/HEALTH-2 shape (shared top-level `validUntil`, optional per-domain
+  `.subjects.<domain>.state`); mutually exclusive with `verifyUnit` (asserted).
+  `healthDomain` requires `healthFile` (asserted).
+- `subjects.<name>.verifyUnit` — name of a nixboot-verify-shaped oneshot (`RemainAfterExit`,
+  no artifact of its own); freshness means "ran and passed THIS boot", judged against
+  `UserspaceTimestamp`. Mutually exclusive with `healthFile` (asserted).
+- `subjects.<name>.title` — human label, same convention as `checks.<name>.title`.
+- A subject declaring none of `units`/`healthFile`/`verifyUnit` fails the build (asserted) — it
+  could never report anything but a vacuous, permanent pass.
+- `package` (read-only) — the built `nixwatch-is-it-live` script; reference it by absolute
+  store path from a check's own `probe`, never by bare command name (see
+  [is-it-live](#is-it-live-the-consumer-side-per-host) above for why).
+
 ## The one non-negotiable assertion
 
 A check whose `deadline` is shorter than its own `interval` can never pass — with a tick only
@@ -300,10 +434,14 @@ it fires when violated and stays silent when satisfied.
 | `modules/default.nix` | `nixwatch.*` option schema, assertions, systemd wiring — the only place `nixpush.*` is ever read, and only defensively |
 | `lib/duration.nix` | the pure duration parser (`"5m"` → `300`); shared by `interval`/`deadline`/`timeout` |
 | `lib/runner.nix` | the pure per-check script builder (`mkCheckRunner`) — the actual probe/heartbeat/gate/alert-on-transition logic, callable standalone |
+| `modules/liveness.nix` | `nixwatch.liveness.*` option schema, assertions, systemd wiring for the is-it-live survey — imported by `modules/default.nix` |
+| `lib/liveness.nix` | the pure is-it-live report builder (`mkLivenessReport`) — reads a health document or a verify unit per subject, callable standalone |
 | `examples/host/` | a minimal composed system exercising every implemented option, with NO nixpush present — used by `nix flake check` |
 | `checks/duration.nix` | pure function tests for `lib/duration.nix` |
-| `checks/assertions.nix` | eval-time build-fail/build-succeed tests for every assertion, both directions, including a hand-written nixpush option-surface stub (never the real nixpush flake) |
-| `checks/behavior.nix` | a build-level proof that actually RUNS the generated scripts against a fake `nixpush`, across repeated invocations — the one thing an eval-only test cannot see |
+| `checks/assertions.nix` | eval-time build-fail/build-succeed tests for every `nixwatch.checks.*` assertion, both directions, including a hand-written nixpush option-surface stub (never the real nixpush flake) |
+| `checks/liveness-assertions.nix` | the same eval-time build-fail/build-succeed shape, for every `nixwatch.liveness.*` assertion |
+| `checks/behavior.nix` | a build-level proof that actually RUNS the generated check scripts against a fake `nixpush`, across repeated invocations — the one thing an eval-only test cannot see |
+| `checks/liveness-behavior.nix` | the same build-level proof shape, for `nixwatch-is-it-live` against a fake `systemctl` and real, test-written JSON health-file fixtures |
 | `experiments/` | open questions, including exactly what this generalization deliberately simplified away |
 | `studies/` | write-ups, once one exists |
 | `LICENSE` | MIT |
@@ -324,8 +462,16 @@ for exactly what did not survive the generalization, and why.
 - [x] heartbeat checks: unconditional beacon
 - [x] eval-time assertions for every non-negotiable, proven both directions
 - [x] a build-level behavioral proof of the generated script's real, repeated-invocation behavior
+- [x] `nixwatch.liveness.*` (`modules/liveness.nix` + `lib/liveness.nix`): per-host is-it-live
+      survey — enabled modules, unit activity, health-document (`HEALTH-1`/`HEALTH-2`) or
+      verify-unit freshness, with `UNKNOWN` reported as its own state rather than folded into
+      green or red; proven in `checks/liveness-behavior.nix` against a fake `systemctl`
 - [ ] recovery hysteresis (see `experiments/README.md` #001)
 - [ ] multi-hop `gatedBy` cycle detection beyond direct self-reference (see `experiments/README.md` #002)
+- [ ] no real nix* module on this estate writes a `HEALTH-1`/`HEALTH-2`-shaped health document
+      yet (nixnet's own `checks/coverage.nix` records HEALTH-1/2/3 as unimplemented) —
+      `healthFile`/`healthDomain` are proven against a hand-written fixture, not yet against a
+      real writer
 
 ## Related projects
 
