@@ -1,15 +1,21 @@
 # nixwatch
 
-**A thing either proves it's alive within its own deadline, or nixwatch says so, exactly
-once, on the channel it was told to use — never a metric, never a dashboard, never the
-notification itself.**
+**An alarm tells you that something broke; a dashboard tells you what. nixwatch owns both
+halves of knowing — the liveness verdict, raised exactly once per state transition on the
+channel it was told to use, and the metrics, dashboards and traces that explain it afterwards
+— and neither half ever carries the message itself: delivery is
+[nixpush](https://github.com/julian-corbet/nixpush-corbet-ch)'s job, always.**
 
-`nixwatch` is the mechanism for deciding a thing is unhealthy and raising an alarm about it: a
-liveness/heartbeat discipline as a NixOS module. Named checks, each with a probe (or, for a
-heartbeat, no probe at all), an interval, a staleness deadline, a severity, and a
-[nixpush](https://github.com/julian-corbet/nixpush-corbet-ch) channel to dispatch on. Every
-alert fires exactly once per state TRANSITION — a still-failing tick never re-pages, a
-still-healthy one never speaks at all.
+The alarm half is a liveness/heartbeat discipline as a NixOS module, and it is what exists
+today: named checks, each with a probe (or, for a heartbeat, no probe at all), an interval, a
+staleness deadline, a severity, and a nixpush channel to dispatch on. Every alert fires exactly
+once per state TRANSITION — a still-failing tick never re-pages, a still-healthy one never
+speaks at all.
+
+The observability half is Grafana, victoria-metrics and Tempo: the time series, the dashboards
+and the traces that answer "what was actually happening" once the alarm has already told you
+that something was. No module for it is written yet — see [Status](#status) — but the subject
+is settled, and nothing in this repo is written as if that half belonged somewhere else.
 
 This repo, and the design it implements, is a generalization of one private operator's own
 systemd-timer watchdog engine, born from an incident where a host memory-wedged overnight —
@@ -18,23 +24,52 @@ nothing watching it was independent of it: the alerting path itself depended on 
 that lived on the same box that had just gone dark. The fix that implementation landed on:
 probe every plane from OUTSIDE the thing being watched, alert only on a state transition, and
 push a heartbeat unconditionally so
-silence itself becomes detectable rather than reading as "all clear" by default. This repo is
-that mechanism, with every operator-specific probe, hostname, and bespoke delivery-queue detail
-stripped out — see [What changed vs. the implementation this generalizes](#what-changed-vs-the-implementation-this-generalizes)
+silence itself becomes detectable rather than reading as "all clear" by default. That lesson
+does not soften now that the same repo also owns the dashboards; keeping it sharp is what the
+next section is for. The alarm half is that mechanism, with every operator-specific probe,
+hostname, and bespoke delivery-queue detail stripped out — see
+[What changed vs. the implementation this generalizes](#what-changed-vs-the-implementation-this-generalizes)
 below for exactly what was cut, and why.
+
+## Two jobs, one subject
+
+Deciding that a thing is unhealthy, and being able to explain afterwards what it was doing,
+are one subject: knowing. They are not one JOB, and this repo owning both is precisely what
+makes it worth stating where the seam runs, out loud, rather than leaving it to be inferred
+from which repo somebody happened to put a thing in.
+
+- **Outside-in liveness** — the checks in `modules/default.nix`, on each host's own systemd
+  timers, probing every plane FROM OUTSIDE the thing being watched and alerting on a state
+  transition through nixpush. This path is built to SURVIVE the death of what it watches. It is
+  deliberately dumb, deliberately local, and deliberately dependent on nothing but a timer and
+  one CLI — no database, no cluster, no query language, no browser.
+- **In-cluster observability** — Grafana, victoria-metrics and Tempo, deployed as cluster
+  workloads, answering "what was actually happening" at a resolution no single probe could
+  reach. This path is built to EXPLAIN, not to survive. When the cluster is what died, it dies
+  with it and has nothing to say — which is exactly why the alarm must never route through it.
+
+Confusing the two IS the incident above. A dashboard showing a host is down is not an alarm; it
+is a picture nobody was looking at. An alarm dispatched by infrastructure sitting on the host it
+watches is not an alarm either; it is a note that burns with the building. So the rule that
+falls out of putting both under one roof is a rule about DIRECTION, not about scope: the alarm
+path may never acquire a dependency on the observability path, in either the module code or the
+deployment. A probe that queries a time-series database to decide whether something is up has
+quietly moved itself inside the thing it was supposed to be outside of.
 
 ## What nixwatch is not
 
-- **Not a notification transport.** Every alert and every heartbeat beacon shells out to the
+- **Not a notification transport. This exclusion is permanent, and widening the scope to
+  dashboards did not touch it.** Every alert and every heartbeat beacon shells out to the
   real [`nixpush`](https://github.com/julian-corbet/nixpush-corbet-ch) CLI
-  (`nixpush send --channel <name> ...`) — this module has no idea what a "provider" is, holds
-  no API keys, and will never grow its own delivery logic. `nixwatch.checks.<name>.channel`
-  only ever NAMES a nixpush channel; see
+  (`nixpush send --channel <name> ...`) — this repo has no idea what a "provider" is, holds
+  no API keys, and will never grow its own delivery logic, on either half.
+  `nixwatch.checks.<name>.channel` only ever NAMES a nixpush channel; see
   [Why nixwatch depends on nixpush, and never as a flake input](#why-nixwatch-depends-on-nixpush-and-never-as-a-flake-input)
   for how that naming works without a flake dependency in either direction.
-- **Not a metrics/observability stack.** No Prometheus, no time series, no dashboard — one
-  persisted `STATUS LAST_KNOWN_GOOD_EPOCH` file per check, nothing graphable, nothing
-  queryable after the fact beyond that one line.
+- **Not the alarm path and the observability path collapsed into one.** Owning both halves is
+  not permission to blur them: the checks in `modules/default.nix` persist one
+  `STATUS LAST_KNOWN_GOOD_EPOCH` line per check and read nothing else, specifically so the
+  alarm survives what it watches. See [Two jobs, one subject](#two-jobs-one-subject).
 - **Not the POLICY of what any one operator watches.** This repo ships the mechanism and
   generic examples only (see `examples/host/configuration.nix`). Which checks exist, what
   their probes actually run, which real channels they page — that is private, per-operator
@@ -216,9 +251,11 @@ default PATH is a curated minimal list, not `/run/current-system/sw/bin` — see
 `modules/liveness.nix`'s own header, and nixboot-verify's, for the measured reason a bare
 command name inside a generated script's `probe` is not trustworthy.
 
-**What this does not do:** it is not a fleet dashboard (one host, one report — a reader that
-wants to render many hosts at once is, same as `HEALTH-2`, a READER's job, never this
-module's), and it cannot discover subjects on its own (`moduleEnabled` must be handed in; see
+**What this does not do:** it is not itself the dashboard (one host, one report — rendering
+many hosts at once is, same as `HEALTH-2`, a READER's job: in this repo that reader is the
+observability half, never this module, and a survey that started querying it would have
+inverted the direction [Two jobs, one subject](#two-jobs-one-subject) forbids), and it cannot
+discover subjects on its own (`moduleEnabled` must be handed in; see
 above). It also inherits `HEALTH-2`'s own honest limit one level further down: a `healthFile`
 this module reads is only ever as trustworthy as whatever wrote it — nixwatch can tell you a
 document is stale or absent, never that a present, fresh-looking one is lying.
@@ -262,12 +299,15 @@ worse than one that never had it:
   rejection, never on a transient failure, since retrying is the right answer there). Both
   default to off, so nixpush stays a thin one-shot for a channel that never asked for a queue —
   set them explicitly on any channel that needs them.
-- **No gatus-specific (or any other vendor-specific) dead-man's-switch receiver.** The old
-  engine pushed its own liveness directly to gatus, a specific in-cluster dashboard, with
+- **No vendor-specific dead-man's-switch receiver inside the check mechanism.** The old
+  engine pushed its own liveness directly to gatus, a specific in-cluster status pane, with
   gatus's own `heartbeat.interval` closing the "did the watchdog itself die" loop. nixwatch's
   `kind = "heartbeat"` ships the GENERIC half of that shape (an unconditional beacon on a
-  nixpush channel) and states outright that closing the loop is the receiver's job, never
-  gatus-specific, never any one vendor's.
+  nixpush channel) and states outright that closing the loop is a receiver's job. WHICH
+  receiver is a deployment decision — this repo's observability half may well end up declaring
+  one, and that is fine; what stays true either way is that the beacon never learns its name,
+  never reaches it by any path but a nixpush channel, and never becomes conditional on it
+  being up.
 
 ## Quickstart
 
@@ -448,13 +488,16 @@ it fires when violated and stays silent when satisfied.
 
 ## Status
 
-**Pre-alpha, fresh scaffold.** `modules/default.nix` + `lib/duration.nix` + `lib/runner.nix`
-are real and checked-in: a real per-check systemd service + timer pair, a real generated
-script proven (in `checks/behavior.nix`) to alert on transition only, freeze while gated, and
-beacon unconditionally for a heartbeat — not stubs. Extracted and generalized from one private
+**Pre-alpha. The alarm half is real; the observability half is thesis only.**
+`modules/default.nix` + `lib/duration.nix` + `lib/runner.nix` are real and checked-in: a real
+per-check systemd service + timer pair, a real generated script proven (in
+`checks/behavior.nix`) to alert on transition only, freeze while gated, and beacon
+unconditionally for a heartbeat — not stubs. Extracted and generalized from one private
 operator's own systemd-timer watchdog engine; see
 [What changed vs. the implementation this generalizes](#what-changed-vs-the-implementation-this-generalizes)
-for exactly what did not survive the generalization, and why.
+for exactly what did not survive the generalization, and why. Grafana, victoria-metrics and
+Tempo are this repo's subject as of now, and no line of them is implemented yet — the scope
+was settled first on purpose, so nothing gets built against a promise that contradicts it.
 
 - [x] `nixosModules.nixwatch` / `.default` (`modules/default.nix`)
 - [x] `lib.parseDurationSeconds` (`lib/duration.nix`)
@@ -466,9 +509,13 @@ for exactly what did not survive the generalization, and why.
       survey — enabled modules, unit activity, health-document (`HEALTH-1`/`HEALTH-2`) or
       verify-unit freshness, with `UNKNOWN` reported as its own state rather than folded into
       green or red; proven in `checks/liveness-behavior.nix` against a fake `systemctl`
+- [ ] the observability half: Grafana, victoria-metrics and Tempo as deployable declarations —
+      subject settled, nothing implemented, and deliberately not sketched here until it is
+      (see [Two jobs, one subject](#two-jobs-one-subject) for the one constraint any such
+      implementation inherits: the alarm path may never depend on it)
 - [ ] recovery hysteresis (see `experiments/README.md` #001)
 - [ ] multi-hop `gatedBy` cycle detection beyond direct self-reference (see `experiments/README.md` #002)
-- [ ] no real nix* module on this estate writes a `HEALTH-1`/`HEALTH-2`-shaped health document
+- [ ] no real nix* module in this family writes a `HEALTH-1`/`HEALTH-2`-shaped health document
       yet (nixnet's own `checks/coverage.nix` records HEALTH-1/2/3 as unimplemented) —
       `healthFile`/`healthDomain` are proven against a hand-written fixture, not yet against a
       real writer

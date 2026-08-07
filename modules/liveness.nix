@@ -25,9 +25,11 @@
 #     (or `[ $? -ne 1 ]` to tolerate UNKNOWN) to get this dispatched through nixpush on the
 #     SAME alert-on-transition machinery every other check already uses. This module never
 #     calls nixpush, and never will.
-#   * It is not a fleet dashboard. One host, one report, printed as PASS/FAIL-shaped lines to
-#     this unit's own journal. A reader that wants to render many hosts at once is, same as
-#     nixnet's own HEALTH-2, a READER's job, never this module's.
+#   * It is not itself the dashboard. One host, one report, printed as PASS/FAIL-shaped lines
+#     to this unit's own journal. Rendering many hosts at once is, same as nixnet's own
+#     HEALTH-2, a READER's job -- in this repo, the observability half's (see README's "Two
+#     jobs, one subject"), never this module's, and never something this survey QUERIES: this
+#     is an outside-in liveness check, and it stays outside.
 #   * It cannot discover subjects on its own. `nixwatch.liveness.subjects.<name>.moduleEnabled`
 #     must be HANDED IN by the operator's own configuration.nix (typically
 #     `config.nixnet.enable or false`) -- nixwatch never imports nixnet, nixboot, or any other

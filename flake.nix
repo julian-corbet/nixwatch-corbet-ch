@@ -1,5 +1,5 @@
 {
-  description = "The mechanism for deciding a thing is unhealthy and raising an alarm about it: named liveness checks (probe or heartbeat), a staleness deadline per check, gate relationships so one shared root cause pages once instead of fanning out, and dispatch through a named nixpush channel. Not a notification transport, not a metrics/observability stack, not any one operator's monitoring policy -- see README.md.";
+  description = "Both halves of knowing whether a host is healthy: the outside-in alarm half -- named liveness checks (probe or heartbeat), a staleness deadline per check, gate relationships so one shared root cause pages once instead of fanning out, dispatched through a named nixpush channel -- and the in-cluster observability half, metrics and dashboards and traces, which explains afterwards what the alarm only announced. Never a notification transport (delivery is nixpush's job, no API keys here), and never any one operator's monitoring policy -- see README.md.";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";

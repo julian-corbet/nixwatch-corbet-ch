@@ -1,8 +1,15 @@
 # modules/default.nix
 #
-# nixwatch: the mechanism for deciding a thing is unhealthy and raising an alarm about it --
-# named checks, each with a probe (or, for a heartbeat, no probe at all), an interval, a
-# staleness deadline, a severity, and a nixpush channel to dispatch on.
+# nixwatch's ALARM half: the mechanism for deciding a thing is unhealthy and raising an alarm
+# about it -- named checks, each with a probe (or, for a heartbeat, no probe at all), an
+# interval, a staleness deadline, a severity, and a nixpush channel to dispatch on.
+#
+# The repo owns a second half, in-cluster observability (metrics, dashboards, traces), which is
+# a different JOB from this one and is not implemented here or anywhere yet -- see README's
+# "Two jobs, one subject". The constraint that half places on THIS file is one-directional and
+# permanent: this module may never acquire a dependency on it. A probe that has to query a
+# time-series database to decide whether something is up has moved itself inside the thing it
+# was supposed to be outside of, which is the failure the incident below IS.
 #
 # GENERALIZED FROM a private operator's own systemd-timer watchdog engine, born from an
 # incident where a host memory-wedged overnight -- every service on it, including SSH, went
@@ -32,12 +39,15 @@
 #     "What this does NOT do" for why nixwatch never delivers a notification itself.
 #
 # WHAT THIS DOES NOT DO (stated here, and in README.md, on purpose):
-#   * It is not a notification transport. Every `send()` call in the generated script shells
-#     out to the real `nixpush` CLI (or a bare `nixpush` resolved off $PATH, if
-#     `nixpush.package` isn't present in this config at all -- see `nixpushCmd` below); this
-#     module has no idea what a "provider" is, and never will.
-#   * It is not a metrics/observability stack. No time series, no Prometheus, no dashboard --
-#     one persisted UP/DOWN + last-known-good timestamp per check, nothing graphable.
+#   * It is not a notification transport -- and that exclusion is permanent, unaffected by the
+#     repo also owning dashboards now. Every `send()` call in the generated script shells out
+#     to the real `nixpush` CLI (or a bare `nixpush` resolved off $PATH, if `nixpush.package`
+#     isn't present in this config at all -- see `nixpushCmd` below); this module has no idea
+#     what a "provider" is, holds no API key, and never will.
+#   * It is not where the repo's observability half lives, and never reads from it. One
+#     persisted UP/DOWN + last-known-good timestamp per check is the ENTIRE state this module
+#     keeps, on purpose: the path that raises the alarm has to survive the death of the thing
+#     it watches, and an in-cluster time-series stack cannot (see this file's own header).
 #   * It is not the POLICY of what any one operator watches. This repo ships the mechanism and
 #     generic examples only; which checks exist, what their probes actually run, and which
 #     channels they page belongs in a private, per-operator configuration -- never in this repo.
