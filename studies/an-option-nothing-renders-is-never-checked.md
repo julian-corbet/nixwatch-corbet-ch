@@ -64,3 +64,21 @@ consumer forces. This repository's cluster checks call the refusal proven when
 check instead read the report, it would have passed while the render stayed broken, which is the
 same class of green-but-tested-nothing that this repository's CI file already refuses for
 `--all-systems`.
+
+## A postscript about how conventions travel
+
+The commit that introduced this study also shipped, in `modules/cluster.nix`, the exact sentence the
+study disproves: that an assertion's message is forced whether or not the assertion holds. It was in
+the house comment block every cluster module in the family carries, it was copied in with the block,
+and it survived being written directly above the assertion that only exists because it is false.
+
+That is the sharper lesson, and it is not about laziness. A finding arrives as one specific thing you
+now know; a convention arrives as a whole shape you reach for without re-deriving it. The two were in
+the same file, minutes apart, and the convention won — because nothing in the act of copying a
+template asks whether the template is still true.
+
+So the rule is narrow and mechanical: **when a finding contradicts a sentence you are about to copy,
+the copy is the thing that has to change, in the same commit.** Not filed for later, because the
+version that ships is the one the next repository is scaffolded from. Six sibling repositories had
+already taken this sentence from `nixk3s/modules/addressing/default.nix` before anybody noticed, and
+it had to be corrected in all seven.
