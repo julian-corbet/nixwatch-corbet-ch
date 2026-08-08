@@ -1,5 +1,83 @@
 {
   "nodes": {
+    "flake-utils": {
+      "inputs": {
+        "systems": "systems"
+      },
+      "locked": {
+        "lastModified": 1731533236,
+        "narHash": "sha256-l0KFg5HjrsfsO/JpG+r7fRrqm12kzFHyUHqHCVpMMbI=",
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "rev": "11707dc2f618dd54ca8739b309ec4fc024de578b",
+        "type": "github"
+      },
+      "original": {
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "type": "github"
+      }
+    },
+    "nix-kube-generators": {
+      "locked": {
+        "lastModified": 1748274972,
+        "narHash": "sha256-Z8Bh7Y9Rr8PPspfb5M1nNW+zdwdyt43htN1lDqiH09M=",
+        "owner": "farcaller",
+        "repo": "nix-kube-generators",
+        "rev": "eeeaeacd7b7a2618baf08b8458f3dc4766752df8",
+        "type": "github"
+      },
+      "original": {
+        "owner": "farcaller",
+        "repo": "nix-kube-generators",
+        "type": "github"
+      }
+    },
+    "nixidy": {
+      "inputs": {
+        "flake-utils": "flake-utils",
+        "nix-kube-generators": "nix-kube-generators",
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1785497743,
+        "narHash": "sha256-stIu1xXWtj3hVFmMrxpos2eBr5BuPIeNNpTWlbVPVio=",
+        "owner": "arnarg",
+        "repo": "nixidy",
+        "rev": "88f784d3b1d5ca8464a005758b2db4c7fa0582ea",
+        "type": "github"
+      },
+      "original": {
+        "owner": "arnarg",
+        "repo": "nixidy",
+        "type": "github"
+      }
+    },
+    "nixk3s": {
+      "inputs": {
+        "nixidy": [
+          "nixidy"
+        ],
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1786142562,
+        "narHash": "sha256-F/0GzAFiffEIjvWciUgZyHYuYEdvJX4rLx93SvtoCxg=",
+        "owner": "julian-corbet",
+        "repo": "nixk3s-corbet-ch",
+        "rev": "3dbb14c9ed5ec5c9ce69a6d3e3bebab86d0b116b",
+        "type": "github"
+      },
+      "original": {
+        "owner": "julian-corbet",
+        "repo": "nixk3s-corbet-ch",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1785318670,
@@ -18,7 +96,24 @@
     },
     "root": {
       "inputs": {
+        "nixidy": "nixidy",
+        "nixk3s": "nixk3s",
         "nixpkgs": "nixpkgs"
+      }
+    },
+    "systems": {
+      "locked": {
+        "lastModified": 1681028828,
+        "narHash": "sha256-Vy1rq5AaRuLzOxct8nz4T6wlgyUR7zLU309k9mBC768=",
+        "owner": "nix-systems",
+        "repo": "default",
+        "rev": "da67096a3b9bf56a91d16901293e51ba5b49a27e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-systems",
+        "repo": "default",
+        "type": "github"
       }
     }
   },

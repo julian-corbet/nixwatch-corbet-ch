@@ -9,6 +9,39 @@ If something in here turns out to matter, distill the actual finding into
 
 See the main [README](../README.md) for the project itself.
 
+- `verify-upstream-coordinates.sh` — every upstream coordinate in
+  [`../lib/observability.nix`](../lib/observability.nix) checked against the registry or chart
+  repository it names: container image repositories through the registry API, and chart
+  repositories through their `index.yaml`. `--tags N` additionally shows some of what upstream is
+  publishing, which is the question this repository deliberately cannot answer from its own data —
+  it pins no versions anywhere. Reads the coordinates out of the catalogue rather than a second
+  hand-kept list.
+
+  **It earned its place on its first run, and not in the way it was meant to.** Three of the eight
+  coordinates came back FAIL, and all three existed. The bug was in the script: `grep -q` exits the
+  instant it matches, the process piping into it then dies of SIGPIPE with status 141, and under
+  `set -o pipefail` the pipeline's status is that 141 rather than grep's own 0. A successful match
+  on a large input reads as a failure — and a small input passes, because the writer finishes before
+  grep can exit. So the failure only appears against real inputs, which is the shape of bug that
+  survives review and every short test. The fix is a here-string instead of a pipeline; the finding
+  is that `grep -q` and `pipefail` are a trap in any verification script, and worth checking for in
+  the siblings that share this script's shape.
+
+  Second, smaller finding, recorded so nobody copies a string out of the output: `--tags` is a HINT
+  rather than a listing. A registry lists tags in its own order, which is not recency, and includes
+  per-architecture build tags nobody should declare; a chart index grep can pick up a DEPENDENCY's
+  version constraint rather than the chart's own version. Enough to answer "is anything published
+  here at all", not enough to answer "what should I pin".
+
+## Why the coordinate check lives here and not in `checks/`
+
+`checks/` is `nix flake check`-wired and evaluates offline. It proves how a declaration RESOLVES,
+exhaustively and in both directions, and it reads the rendered manifests back. What it cannot prove
+is that a registry still serves a repository today, or that a chart repository has not been renamed.
+Those are facts about the world: they change without this repository changing, and asserting them at
+eval time would need either network access from a pure evaluation or a snapshot that silently goes
+stale.
+
 ## Open questions worth an experiment, not yet run
 
 nixwatch v1 is a fresh scaffold, generalized out of one private implementation's own
@@ -91,3 +124,44 @@ trip," not measured against a real, slow `nixpush send` invocation under load.
 
 **Status:** open. No real measurement of `nixpush send`'s own worst-case latency has fed back
 into this constant yet.
+
+## 005 — is a declared growth term worth anything if nothing ever measures it?
+
+**Question:** each pillar declares what drives its size — `activeSeries`, `ingestMiBPerDay`,
+`sampledPercent` — and every one of them is an ESTIMATE that no rendered object reads and nothing
+enforces. `nixwatch.cluster.retention` publishes them beside the retention they multiply against,
+which is what makes "what does this stack cost to keep" answerable from the declaration. But a
+number nobody checks against reality is a number that drifts, and a stack whose declared cardinality
+is a tenth of its real one reads as a plan while being a fiction.
+
+**Hypothesis:** the estimate earns its place even unmeasured, because its VALUE is at declaration
+time — it is the number a person has to look up before adding a pillar, and the difference between
+"we run a trace store" and "we run a trace store sized for a tenth of production". Whether it stays
+accurate afterwards is a different question from whether stating it was worth it. What would settle
+this is comparing the declared numbers against what the running stores report about themselves after
+a month.
+
+**Method sketch:** query each store for its own actual figure — active series, bytes ingested per
+day, spans accepted — and compare against the declaration. If the two diverge by an order of
+magnitude within a month, the estimate is decoration and should either be dropped or reconciled by
+something that reads both.
+
+**Status:** open. Nothing here has run against a real deployment yet.
+
+## 006 — should a config-file retention be reconciled rather than published?
+
+**Question:** two of the three store entries take their retention from their own configuration file,
+which this module does not render. The declared number is published with `enforced = false`, and the
+file that has to implement it is the consumer's. So a declaration saying `30d` beside a file saying
+`7d` is a lie this repository cannot catch — it can only make the two visible in one place each.
+
+**Hypothesis:** rendering those configuration files here would be the wrong fix, and for the same
+reason the app grammar exists: the file's schema belongs to somebody else's release, and a module
+that renders one is a second implementation that goes stale on the vendor's schedule rather than
+ours. The right fix, if there is one, is probably a CHECK rather than a renderer — something that
+reads the consumer's rendered ConfigMap and compares the number against the declaration, which is
+possible in a private consumer's own render and not possible here.
+
+**Status:** open, and deliberately so. The honest half is shipped (the report says which retentions
+are enforced and which are not); what is missing is a way for a consumer to close the loop without
+this repository growing a config renderer.

@@ -12,10 +12,12 @@ staleness deadline, a severity, and a nixpush channel to dispatch on. Every aler
 once per state TRANSITION — a still-failing tick never re-pages, a still-healthy one never
 speaks at all.
 
-The observability half is Grafana, victoria-metrics and Tempo: the time series, the dashboards
-and the traces that answer "what was actually happening" once the alarm has already told you
-that something was. No module for it is written yet — see [Status](#status) — but the subject
-is settled, and nothing in this repo is written as if that half belonged somewhere else.
+The observability half is the time series, the logs, the traces and the dashboards that answer
+"what was actually happening" once the alarm has already told you that something was. It is a
+cluster declaration rather than a host one — a metrics store, a log store and its shipper, a
+trace store, a dashboard that reads them, and the one piece of the alarm path that lives in a
+cluster: an active black-box prober with a status page. See
+[The observability half](#the-observability-half-declared) below.
 
 This repo, and the design it implements, is a generalization of one private operator's own
 systemd-timer watchdog engine, born from an incident where a host memory-wedged overnight —
@@ -43,10 +45,11 @@ from which repo somebody happened to put a thing in.
   transition through nixpush. This path is built to SURVIVE the death of what it watches. It is
   deliberately dumb, deliberately local, and deliberately dependent on nothing but a timer and
   one CLI — no database, no cluster, no query language, no browser.
-- **In-cluster observability** — Grafana, victoria-metrics and Tempo, deployed as cluster
-  workloads, answering "what was actually happening" at a resolution no single probe could
-  reach. This path is built to EXPLAIN, not to survive. When the cluster is what died, it dies
-  with it and has nothing to say — which is exactly why the alarm must never route through it.
+- **In-cluster observability** — the stores, the shipper and the dashboard in
+  `modules/cluster.nix`, deployed as cluster workloads, answering "what was actually happening" at
+  a resolution no single probe could reach. This path is built to EXPLAIN, not to survive. When the
+  cluster is what died, it dies with it and has nothing to say — which is exactly why the alarm
+  must never route through it.
 
 Confusing the two IS the incident above. A dashboard showing a host is down is not an alarm; it
 is a picture nobody was looking at. An alarm dispatched by infrastructure sitting on the host it
@@ -55,6 +58,12 @@ falls out of putting both under one roof is a rule about DIRECTION, not about sc
 path may never acquire a dependency on the observability path, in either the module code or the
 deployment. A probe that queries a time-series database to decide whether something is up has
 quietly moved itself inside the thing it was supposed to be outside of.
+
+The two halves are also two evaluations that never meet: the alarm half is a NixOS module and the
+observability half is a cluster module, and neither imports the other in either direction. Inside
+the cluster half — where the prober and the stores DO share one file, one namespace scheme and one
+render — that rule stops being a convention and becomes four structural refusals; see
+[the one-directional rule, in the cluster](#the-one-directional-rule-in-the-cluster).
 
 ## What nixwatch is not
 
@@ -69,11 +78,22 @@ quietly moved itself inside the thing it was supposed to be outside of.
 - **Not the alarm path and the observability path collapsed into one.** Owning both halves is
   not permission to blur them: the checks in `modules/default.nix` persist one
   `STATUS LAST_KNOWN_GOOD_EPOCH` line per check and read nothing else, specifically so the
-  alarm survives what it watches. See [Two jobs, one subject](#two-jobs-one-subject).
+  alarm survives what it watches — and in the cluster half, where both paths do share one file,
+  the separation is four structural refusals rather than a convention. See
+  [Two jobs, one subject](#two-jobs-one-subject) and
+  [the one-directional rule, in the cluster](#the-one-directional-rule-in-the-cluster).
 - **Not the POLICY of what any one operator watches.** This repo ships the mechanism and
-  generic examples only (see `examples/host/configuration.nix`). Which checks exist, what
-  their probes actually run, which real channels they page — that is private, per-operator
-  configuration, and it belongs there, never in this repo.
+  generic examples only (see `examples/host/configuration.nix` and `examples/cluster/values.nix`).
+  Which checks exist, what their probes actually run, which real channels they page, which
+  namespace or node path or slot a store gets — that is private, per-operator configuration, and
+  it belongs there, never in this repo.
+- **Not a renderer of Kubernetes objects, and not a renderer of anybody's configuration file.**
+  The cluster half declares what a stack NEEDS and defines it into a sibling repository's app
+  grammar; the addresses it derives for a dashboard's data sources, a shipper's destination and a
+  prober's endpoint list are PUBLISHED, because what consumes each of those is a configuration
+  file belonging to somebody else's software. Publishing a derived address is honest; rendering
+  somebody else's schema from here is a second implementation that goes stale on their release
+  schedule.
 - **Cannot detect its own death.** This is the one honest limit worth stating plainly rather
   than glossing over: a heartbeat check's `deadline` is a PROMISE folded into the beacon's own
   message text ("expect one at least every ..."), not a value nixwatch enforces. Enforcing it
@@ -260,6 +280,109 @@ above). It also inherits `HEALTH-2`'s own honest limit one level further down: a
 this module reads is only ever as trustworthy as whatever wrote it — nixwatch can tell you a
 document is stale or absent, never that a present, fresh-looking one is lying.
 
+## The observability half, declared
+
+`modules/cluster.nix` is the other half: a cluster module (composed into a
+[nixidy](https://github.com/arnarg/nixidy) environment, beside
+[nixk3s](https://github.com/julian-corbet/nixk3s-corbet-ch)'s app grammar) that declares six kinds
+of workload and renders every one of them through that grammar rather than building Kubernetes
+objects of its own. It shares no evaluation with the host half above and imports nothing from it.
+
+Two of those six are things a person opens. Four are things only other components talk to. That
+split runs through the whole option surface:
+
+| group | what it is | reachable |
+|---|---|---|
+| `metrics.<name>` | a time-series store | no — in-cluster DNS only |
+| `logs.<name>` | a log store | no |
+| `traces.<name>` | a trace store | no |
+| `shippers.<name>` | carries a node's logs into a log store | no — nothing dials it at all |
+| `dashboards.<name>` | what a person opens to read the pillars | yes: `exposure`, `slot` |
+| `probers.<name>` | active black-box checks with a status page | yes: `exposure`, `slot` |
+
+A store and a shipper have **no `exposure` option and no `slot` option at all** — writing either is
+"the option does not exist". A slot is a fleet identity, and a workload nobody reaches from outside
+the cluster does not have one; `nixwatch.cluster.unaddressed` lists every workload in that position
+so the absence reads as a decision rather than an omission.
+
+### The three pillars are three groups, and each says what it costs
+
+Metrics, logs and traces are not interchangeable, so they are not declarable as if they were. Each
+group requires a `retention` and one growth term the other two do not have as an option:
+
+| group | growth term | why that one |
+|---|---|---|
+| `metrics` | `activeSeries` | cardinality prices a metrics store; sampling twice as often barely moves it, and one unbounded label multiplies it |
+| `logs` | `ingestMiBPerDay` | traffic prices a log store; nothing about the number of things watched predicts it |
+| `traces` | `sampledPercent` | a trace store's answer to cost is keeping less of it, not keeping it for less long |
+
+Asking a metrics store how many bytes a day it takes is an unknown option. `nixwatch.cluster
+.retention` publishes all of it in one place — pillar, retention, growth term, and whether the
+declared retention actually reaches the running store (some of these programs take it as a
+command-line argument this module renders; some read it from their own configuration file, which
+this module does not, and the report says `enforced = false` rather than implying otherwise). See
+[`studies/three-pillars-are-three-option-groups.md`](studies/three-pillars-are-three-option-groups.md).
+
+**A shipper is not a store.** It has no `retention`, no growth term and nothing to back, because it
+keeps no data — only how far it has read, and losing that costs a duplicate or a gap at the seam,
+never the contents. It also runs one copy per NODE, which the app grammar has no term for (it
+renders one Deployment per app), so its objects arrive whole, like a chart's.
+
+### The dashboard names stores, never addresses
+
+`dashboards.<name>.reads` is a list of declared store names. There is no URL option on a dashboard
+anywhere in this module: every data-source address is DERIVED from the store's own name, the
+observability namespace, the cluster domain and the port its catalogue entry says readers query on
+(which is not always the port writers push to). A dashboard naming a store nobody declared fails
+eval, listing the stores that do exist.
+
+The addresses are then PUBLISHED at `nixwatch.cluster.dashboardSources`, not rendered — what
+consumes them is the dashboard's own provisioning file, which belongs to somebody else's software.
+The same applies to a shipper's push destination (`shipperTargets`) and a prober's endpoint list
+(`proberTargets`). What the declaration buys is that none of those files can be written against
+something that is not there.
+
+### The one-directional rule, in the cluster
+
+The prober is the alarm path living inside a cluster, and this is where the rule from
+[Two jobs, one subject](#two-jobs-one-subject) has to survive contact with a file where the stores
+are one line away. Four levels, only two of which are code that runs:
+
+1. **A workload's path is not declarable.** `alarm` or `observability` is a property of the
+   software, read from the catalogue.
+2. **There is no `namespace` option anywhere.** A workload's namespace is its path's, and the two
+   namespaces are separate, defaultless options that must differ.
+3. **An alarm-path workload has no option that could name a store.** `reads` belongs to dashboards
+   and `ships` to shippers; on a prober both are "the option does not exist".
+4. **Every free-text string a prober carries is scanned** — its targets, its environment, its
+   arguments — against the derived in-cluster addresses of the observability path, that path's DNS
+   suffix, and its workloads by name where a URL's authority begins. A hit **fails eval quoting the
+   rule**. It is not a warning: a warning about this is a warning about the one thing this
+   repository exists to prevent.
+
+The reverse direction is not forbidden — a dashboard reading a prober would be the safe direction —
+it is merely unrepresentable, because a prober is not a store. See
+[`studies/the-alarm-path-is-not-declarable-against-the-stores.md`](studies/the-alarm-path-is-not-declarable-against-the-stores.md).
+
+**And the limit no option fixes:** the in-cluster prober cannot outlive the cluster it runs in.
+When the node dies it dies with it and raises no alarm about anything, including itself. That is
+not a gap in this module — it is the reason the host half exists, on each machine's own systemd
+timers, outside every cluster. Declaring a status pane is never a reason to stop declaring those.
+
+### What it renders, and what it does not
+
+Everything expressible as an app is defined into `nixk3s.apps` and rendered by that grammar: a
+Deployment, a Service (a store still needs an in-cluster address), an optional Namespace. What the
+grammar has no term for — a vendor's whole-stack chart, a per-node DaemonSet — is delivered as
+whole objects one level below it, with server-side apply and diff, and listed in
+`nixwatch.cluster.renderedDirectly` so the untyped surface is countable.
+
+A chart-delivered store is still declarable, and still accounted for in the retention report — but
+**a dashboard or a shipper naming one is refused**, because a chart names its own Services from its
+own template and the address this module would derive is one the chart never creates. The failure
+that refusal replaces is the quiet kind: everything applies, everything reports healthy, and one
+data source times out until somebody clicks the panel.
+
 ## What changed vs. the implementation this generalizes
 
 Stated plainly, because a generalization that quietly drops behavior without saying so is
@@ -392,6 +515,82 @@ $ cat /var/lib/nixwatch/example-api
 UP 1785412860
 ```
 
+### Quickstart: the cluster half
+
+A different evaluation entirely — a nixidy environment, with the app grammar imported alongside.
+See [`examples/cluster/values.nix`](examples/cluster/values.nix) for the complete version `nix
+flake check` renders and asserts.
+
+```nix
+nixidy.lib.mkEnv {
+  inherit pkgs;
+  modules = [
+    nixk3s.nixidyModules.apps        # the grammar this module defines into -- required
+    nixk3s.nixidyModules.addressing  # the band model -- optional
+    nixwatch.nixidyModules.default
+    ./values.nix
+  ];
+}
+```
+
+```nix
+# values.nix
+nixwatch.cluster.platform = {
+  namespace = "example-observability";   # everything that EXPLAINS
+  alarmNamespace = "example-status";     # everything that DECIDES -- must differ
+  origin = "nixwatch";                   # only when the band model is in the render
+};
+
+nixwatch.cluster.metrics.example-metrics = {
+  store = "victoria-metrics";
+  version = "0.0.0";
+  retention = "30d";                     # reaches this store as an argument
+  activeSeries = 500000;                 # what a metrics store actually costs
+  state.data.hostPath = "/example/state/metrics";
+};
+
+nixwatch.cluster.logs.example-logs = {
+  store = "loki";
+  version = "0.0.0";
+  retention = "14d";
+  ingestMiBPerDay = 2048;                # what a log store actually costs
+  state.data.hostPath = "/example/state/logs";
+};
+
+nixwatch.cluster.shippers.example-shipper = {
+  shipper = "alloy";
+  ships = "example-logs";                # the push address is DERIVED from this
+  manifests = [ (builtins.readFile ./rendered-shipper-chart.yaml) ];
+};
+
+nixwatch.cluster.dashboards.example-dashboard = {
+  dashboard = "grafana";
+  version = "0.0.0";
+  slot = 96;
+  exposure = "nb";
+  reads = [ "example-metrics" "example-logs" ];   # names, never addresses
+  state.data.hostPath = "/example/state/dashboard";
+  credentials.adminPassword = { secret = "example-dashboard-admin"; key = "password"; };
+};
+
+# THE ALARM PATH, in its own namespace. Nothing here can name a store: `reads` is not an option on
+# this group, and a target URL pointing into the observability path fails eval.
+nixwatch.cluster.probers.example-status = {
+  prober = "gatus";
+  version = "0.0.0";
+  slot = 97;
+  exposure = "nb";
+  state.data.hostPath = "/example/state/status";
+  targets.example-site.url = "https://example.com/healthz";
+};
+```
+
+```console
+$ nix eval --json .#nixidyEnvs.default.config.nixwatch.cluster.retention
+{"example-logs":{"enforced":false,"growth":"2048 MiB per day","pillar":"logs","retention":"14d",...},
+ "example-metrics":{"enforced":true,"growth":"500000 active series","pillar":"metrics",...}}
+```
+
 ## Options reference
 
 `nixwatch.*` (`modules/default.nix`):
@@ -454,6 +653,34 @@ above for the full picture):
   store path from a check's own `probe`, never by bare command name (see
   [is-it-live](#is-it-live-the-consumer-side-per-host) above for why).
 
+`nixwatch.cluster.*` (`modules/cluster.nix`; see
+[The observability half](#the-observability-half-declared) above for the full picture). A different
+module class — `nixidyModules`, not `nixosModules` — and a different evaluation:
+
+- `platform.namespace` / `.alarmNamespace` — where the observability path and the alarm path land.
+  Neither is defaulted, both are required the moment a workload of that path is declared, and they
+  must differ. There is no per-workload `namespace` option anywhere.
+- `platform.project` / `.clusterDomain` / `.origin` — the delivery project, the internal DNS domain
+  every derived address is built from, and the declaring-origin name handed to the band model (null
+  unless that model is part of the same render).
+- `metrics.<name>` / `logs.<name>` / `traces.<name>` — the three pillars, one group each. All share
+  `store` (from the catalogue), `retention` (required, and refused without a unit — it is passed
+  verbatim to a program with its own default unit), `state`, `version`/`image`, `credentials`,
+  `env`, `args`, `manifests`. Each adds exactly one growth term: `activeSeries`,
+  `ingestMiBPerDay`, `sampledPercent` (1–100). None of the three has the other two's.
+- `shippers.<name>` — `shipper` (from the catalogue) and `ships`, the name of a declared LOG store.
+  No `retention`, no growth term, no `exposure`, no `slot`: a shipper keeps nothing and is dialled
+  by nothing.
+- `dashboards.<name>` — `dashboard`, plus `reads` (names of declared stores, at least one) and the
+  two fronted options `exposure` and `slot`. No URL option exists.
+- `probers.<name>` — `prober`, plus `targets.<name>.url` (at least one) and the same two fronted
+  options. **No option here can name anything on the observability path**, and every string it
+  carries is scanned for one.
+- Read-only reports: `retention` (what each pillar costs to keep, and whether the number is
+  enforced), `dashboardSources`, `shipperTargets`, `proberTargets` (all derived, published for the
+  configuration files this module does not render), `observabilityPath` / `alarmPath`,
+  `unaddressed`, `slots`, `renderedByGrammar` / `renderedDirectly`.
+
 ## The one non-negotiable assertion
 
 A check whose `deadline` is shorter than its own `interval` can never pass — with a tick only
@@ -470,34 +697,43 @@ it fires when violated and stays silent when satisfied.
 
 | Path | What |
 |---|---|
-| `flake.nix` | `nixosModules.nixwatch`/`.default`; `lib.parseDurationSeconds` |
+| `flake.nix` | `nixosModules.nixwatch`/`.default` (the alarm half); `nixidyModules.nixwatch`/`.default` (the observability half); `lib.parseDurationSeconds`; `lib.observability` |
 | `modules/default.nix` | `nixwatch.*` option schema, assertions, systemd wiring — the only place `nixpush.*` is ever read, and only defensively |
 | `lib/duration.nix` | the pure duration parser (`"5m"` → `300`); shared by `interval`/`deadline`/`timeout` |
 | `lib/runner.nix` | the pure per-check script builder (`mkCheckRunner`) — the actual probe/heartbeat/gate/alert-on-transition logic, callable standalone |
 | `modules/liveness.nix` | `nixwatch.liveness.*` option schema, assertions, systemd wiring for the is-it-live survey — imported by `modules/default.nix` |
 | `lib/liveness.nix` | the pure is-it-live report builder (`mkLivenessReport`) — reads a health document or a verify unit per subject, callable standalone |
+| `modules/cluster.nix` | `nixwatch.cluster.*` — the six workload groups, every guard, and the translation into the app grammar. Renders no Kubernetes object of its own |
+| `lib/observability.nix` | the cluster catalogue: what each piece of software IS — its path, its delivery, its ports, the directories it cannot lose, how its retention reaches it. Knowledge, never values |
 | `examples/host/` | a minimal composed system exercising every implemented option, with NO nixpush present — used by `nix flake check` |
+| `examples/cluster/` | one complete declaration on both paths, with all three pillars — rendered and asserted field by field by `nix flake check` |
 | `checks/duration.nix` | pure function tests for `lib/duration.nix` |
 | `checks/assertions.nix` | eval-time build-fail/build-succeed tests for every `nixwatch.checks.*` assertion, both directions, including a hand-written nixpush option-surface stub (never the real nixpush flake) |
 | `checks/liveness-assertions.nix` | the same eval-time build-fail/build-succeed shape, for every `nixwatch.liveness.*` assertion |
 | `checks/behavior.nix` | a build-level proof that actually RUNS the generated check scripts against a fake `nixpush`, across repeated invocations — the one thing an eval-only test cannot see |
 | `checks/liveness-behavior.nix` | the same build-level proof shape, for `nixwatch-is-it-live` against a fake `systemctl` and real, test-written JSON health-file fixtures |
-| `experiments/` | open questions, including exactly what this generalization deliberately simplified away |
-| `studies/` | write-ups, once one exists |
+| `checks/cluster-eval.nix` | every guard the cluster module makes, in both directions — plus the separations that are NOT guards, asserted as unknown-option errors rather than as rules somebody remembered |
+| `checks/cluster-render.nix` | the manifests the cluster half actually produced, parsed and asserted field by field, including the two central ABSENCES: no observability coordinate in the alarm path's objects, and no derived address anywhere in the tree |
+| `experiments/` | open questions, plus the script that checks every upstream coordinate in the catalogue against the registry that serves it |
+| `studies/` | three write-ups from building the cluster half — the one-directional rule made structural, why the three pillars are three groups, and why an option nothing renders is never checked |
 | `LICENSE` | MIT |
 
 ## Status
 
-**Pre-alpha. The alarm half is real; the observability half is thesis only.**
+**Pre-alpha. Both halves are real.**
 `modules/default.nix` + `lib/duration.nix` + `lib/runner.nix` are real and checked-in: a real
 per-check systemd service + timer pair, a real generated script proven (in
 `checks/behavior.nix`) to alert on transition only, freeze while gated, and beacon
 unconditionally for a heartbeat — not stubs. Extracted and generalized from one private
 operator's own systemd-timer watchdog engine; see
 [What changed vs. the implementation this generalizes](#what-changed-vs-the-implementation-this-generalizes)
-for exactly what did not survive the generalization, and why. Grafana, victoria-metrics and
-Tempo are this repo's subject as of now, and no line of them is implemented yet — the scope
-was settled first on purpose, so nothing gets built against a promise that contradicts it.
+for exactly what did not survive the generalization, and why.
+
+`modules/cluster.nix` + `lib/observability.nix` are real in the same sense: rendered through the
+real app grammar and the real renderer by `nix flake check`, with the manifests read back and
+asserted field by field. What is NOT claimed is production mileage — no declaration written
+against it has run a cluster yet, and the growth terms it asks for have never been compared
+against what a running store reports about itself (`experiments/README.md` #005).
 
 - [x] `nixosModules.nixwatch` / `.default` (`modules/default.nix`)
 - [x] `lib.parseDurationSeconds` (`lib/duration.nix`)
@@ -509,10 +745,17 @@ was settled first on purpose, so nothing gets built against a promise that contr
       survey — enabled modules, unit activity, health-document (`HEALTH-1`/`HEALTH-2`) or
       verify-unit freshness, with `UNKNOWN` reported as its own state rather than folded into
       green or red; proven in `checks/liveness-behavior.nix` against a fake `systemctl`
-- [ ] the observability half: Grafana, victoria-metrics and Tempo as deployable declarations —
-      subject settled, nothing implemented, and deliberately not sketched here until it is
-      (see [Two jobs, one subject](#two-jobs-one-subject) for the one constraint any such
-      implementation inherits: the alarm path may never depend on it)
+- [x] `nixidyModules.nixwatch` / `.default` (`modules/cluster.nix` + `lib/observability.nix`): the
+      six workload groups, the three pillars each with the growth term that prices it, the
+      dashboard's typed relationship to the stores it reads, a shipper that is not a store, and
+      slotless workloads that are slotless structurally
+- [x] the one-directional rule, structural in the cluster half: a path the catalogue owns, two
+      namespaces that must differ, no option on an alarm-path workload that could name a store,
+      and a scan of every free-text string it does carry — proven in both directions, mutation
+      tested, and re-checked on the rendered bytes
+- [ ] no declaration written against the cluster half has run a real cluster yet; the growth terms
+      are unmeasured estimates (`experiments/README.md` #005) and a config-file retention is
+      published rather than reconciled (#006)
 - [ ] recovery hysteresis (see `experiments/README.md` #001)
 - [ ] multi-hop `gatedBy` cycle detection beyond direct self-reference (see `experiments/README.md` #002)
 - [ ] no real nix* module in this family writes a `HEALTH-1`/`HEALTH-2`-shaped health document
@@ -528,6 +771,10 @@ common design system:
 mechanism every alert and heartbeat this module raises actually travels through — named by
 string, never a flake input; see
 [Why nixwatch depends on nixpush](#why-nixwatch-depends-on-nixpush-and-never-as-a-flake-input)),
+[nixk3s](https://github.com/julian-corbet/nixk3s-corbet-ch) (the app grammar the observability
+half declares into, and the band model that governs which slots its two reachable workloads may
+take — imported by a consumer directly, and a checks-only input here so `nix flake check` can
+render through the real thing),
 [nixstorage](https://github.com/julian-corbet/nixstorage-corbet-ch) (a sibling in spirit —
 the same "hard-won rules as enforced modules, not documentation to remember" shape, and the
 same "read a sibling's config defensively, never as a flake input" convention this repo

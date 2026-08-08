@@ -23,7 +23,25 @@
 #
 # PLUS `modules-evaluate`: the composed-host check (examples/host/configuration.nix), the
 # same "every real, implemented option, once" shape nixstorage's own checks/default.nix uses.
-{ pkgs, lib, nixpkgs, system, nixwatchModule }:
+#
+# AND THE CLUSTER HALF, which needs neither NixOS nor a host at all: `cluster-eval` and
+# `cluster-render` compose modules/cluster.nix into a real nixidy environment beside the real app
+# grammar (checks/cluster-eval.nix, checks/cluster-render.nix -- see their own headers). They are
+# built from examples/cluster/values.nix, so a module that stops evaluating, or that grows a
+# required value nobody supplies, fails in CI rather than in somebody's cluster. `withCluster` is
+# false on every system but the one they are declared under -- see flake.nix for why declaring them
+# twice would check nothing twice and break `--all-systems` instead.
+{ pkgs
+, lib
+, nixpkgs
+, system
+, nixwatchModule
+, nixidy
+, clusterModule
+, appsModule
+, addressingModule
+, withCluster
+}:
 
 let
   durationResults = import ./duration.nix { inherit lib; };
@@ -70,9 +88,28 @@ let
   modules-evaluate =
     pkgs.writeText "nixwatch-host-drvpath"
       (builtins.unsafeDiscardStringContext composedHost.config.system.build.toplevel.drvPath);
+
+  # The cluster half, rendered through the real grammar and the real renderer, from the placeholder
+  # values in examples/. Building the environment package forces the whole manifest tree.
+  clusterEnv = nixidy.lib.mkEnv {
+    inherit pkgs;
+    modules = [
+      appsModule
+      addressingModule
+      clusterModule
+      ../examples/cluster/values.nix
+    ];
+  };
 in
 {
   inherit eval-tests modules-evaluate;
   behavior-proof = import ./behavior.nix { inherit pkgs lib system; };
   liveness-behavior-proof = import ./liveness-behavior.nix { inherit pkgs lib system; };
+}
+  // lib.optionalAttrs withCluster {
+  cluster-eval = import ./cluster-eval.nix {
+    inherit pkgs lib nixidy clusterModule appsModule addressingModule;
+  };
+
+  cluster-render = import ./cluster-render.nix { inherit pkgs lib; env = clusterEnv; };
 }
