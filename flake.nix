@@ -77,6 +77,11 @@
         default = self.packages.${system}.nixwatch-kiosk;
       });
 
+      # The home-manager plane: makes nixwatch-kiosk the session locker (nixlock's own
+      # KioskContent for it). Modeled exactly on nixlock's own `homeManagerModules.locker`.
+      homeManagerModules.kiosk = ./home/kiosk.nix;
+      homeManagerModules.default = self.homeManagerModules.kiosk;
+
       # The pure duration parser, exposed standalone -- the same "expose the builder function
       # for anyone who wants it without the module system" reasoning nixstorage uses for its
       # own `lib.buildLayoutImage`/`lib.partitionRoles`.

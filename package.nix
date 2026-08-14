@@ -18,7 +18,7 @@ rustPlatform.buildRustPackage {
   cargoLock = {
     lockFile = ./Cargo.lock;
     outputHashes = {
-      "nixlock-0.1.0" = "sha256-iDtYrhMCqH23cqNks43iCnWeUt7/1F5cbo44e2cY1aU=";
+      "nixlock-0.1.0" = "sha256-XJ9dGlUqC9touUM5wOn+DMDLk9dZGhXf3G+05IBtye8=";
     };
   };
 

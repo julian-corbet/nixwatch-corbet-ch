@@ -277,7 +277,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -618,7 +618,7 @@ dependencies = [
 [[package]]
 name = "nixlock"
 version = "0.1.0"
-source = "git+https://github.com/julian-corbet/nixlock-corbet-ch?rev=6b2005a7ced78f204edc93a2f522d7b1a2957e81#6b2005a7ced78f204edc93a2f522d7b1a2957e81"
+source = "git+https://github.com/julian-corbet/nixlock-corbet-ch?rev=54ad9cb16088a605dd7f070b4ca20064ec590517#54ad9cb16088a605dd7f070b4ca20064ec590517"
 dependencies = [
  "calloop",
  "calloop-wayland-source",
@@ -847,7 +847,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
