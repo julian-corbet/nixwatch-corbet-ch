@@ -1,0 +1,40 @@
+[package]
+name = "nixwatch-kiosk"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Renders the Gatus observability dashboard as nixlock kiosk content"
+homepage = "https://github.com/julian-corbet/nixwatch-corbet-ch"
+publish = false
+
+# The dashboard model+render are a [lib] so a future web build can reuse them without pulling
+# in nixlock/wayland at all -- mirrors nixnet's lib-behind-thin-bins layout.
+[lib]
+name = "nixwatch"
+path = "src/lib.rs"
+
+[[bin]]
+name = "nixwatch-kiosk"
+path = "src/bin/nixwatch-kiosk.rs"
+
+[dependencies]
+# The content-agnostic locker this binary is a KioskContent for. Pinned by commit -- there is
+# no crates.io publish (both crates are publish = false), so a git rev is the only source of
+# truth; bump this rev + `cargo update -p nixlock` together when nixlock changes.
+nixlock = { git = "https://github.com/julian-corbet/nixlock-corbet-ch", rev = "6b2005a7ced78f204edc93a2f522d7b1a2957e81" }
+
+# CPU rendering: shapes (tiny-skia) + glyph rasterization (fontdue), same stack nixlock itself
+# uses for its own lock screen -- one Pixmap feeds both --dump PNG and the wl_shm kiosk surface.
+tiny-skia = "0.11"
+fontdue = "0.9"
+
+# Gatus statuses API client + its JSON shape.
+ureq = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Header clock/date formatting.
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+[profile.release]
+opt-level = 2

@@ -67,6 +67,16 @@
       # The cluster catalogue, for inspection without re-reading the file.
       lib.observability = import ./lib/observability.nix { };
 
+      # nixwatch-kiosk: the FIRST Rust crate in this repo, a nixlock KioskContent binary that
+      # renders the Gatus dashboard the observability half above stands up. It links nixlock as a
+      # git dependency (both crates are `publish = false`, no crates.io involved), never as a
+      # flake input -- same "read a sibling by pinned value, not by flake edge" convention this
+      # repo already uses for nixpush (see this file's own header).
+      packages = forAllSystems (system: {
+        nixwatch-kiosk = (pkgsFor system).callPackage ./package.nix { };
+        default = self.packages.${system}.nixwatch-kiosk;
+      });
+
       # The pure duration parser, exposed standalone -- the same "expose the builder function
       # for anyone who wants it without the module system" reasoning nixstorage uses for its
       # own `lib.buildLayoutImage`/`lib.partitionRoles`.

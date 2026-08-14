@@ -1,5 +1,10 @@
 result
 result-*
 
+# Cargo build artifacts. Cargo.lock is intentionally NOT ignored -- it's
+# committed so `nix build` (rustPlatform.buildRustPackage's cargoLock)
+# works fully offline and reproducibly.
+/target
+
 # Claude Code workflow artifacts (worktrees, local agent state)
 .claude/
