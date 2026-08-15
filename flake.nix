@@ -67,18 +67,20 @@
       # The cluster catalogue, for inspection without re-reading the file.
       lib.observability = import ./lib/observability.nix { };
 
-      # nixwatch-kiosk: the FIRST Rust crate in this repo, a nixlock KioskContent binary that
-      # renders the Gatus dashboard the observability half above stands up. It links nixlock as a
-      # git dependency (both crates are `publish = false`, no crates.io involved), never as a
-      # flake input -- same "read a sibling by pinned value, not by flake edge" convention this
-      # repo already uses for nixpush (see this file's own header).
+      # nixwatch-frames: the FIRST Rust crate in this repo, a socket CLIENT that streams the
+      # Gatus dashboard the observability half above stands up onto nixlock's kiosk display Unix
+      # socket (nixlock's own README "Streaming kiosk content" / BEHAVIORS.md DISPLAY-1/
+      # DISPLAY-2). It links no nixlock code at all -- the wire protocol is hand-rolled against a
+      # plain `std::os::unix::net::UnixStream` -- so this is an ordinary, dependency-light nix
+      # build: no git dependency, no outputHashes, no bindgen/PAM/Wayland link surface.
       packages = forAllSystems (system: {
-        nixwatch-kiosk = (pkgsFor system).callPackage ./package.nix { };
-        default = self.packages.${system}.nixwatch-kiosk;
+        nixwatch-frames = (pkgsFor system).callPackage ./package.nix { };
+        default = self.packages.${system}.nixwatch-frames;
       });
 
-      # The home-manager plane: makes nixwatch-kiosk the session locker (nixlock's own
-      # KioskContent for it). Modeled exactly on nixlock's own `homeManagerModules.locker`.
+      # The home-manager plane: runs nixwatch-frames as an ordinary graphical-session service that
+      # streams to whatever nixlock instance is running in the same session -- NOT a lock command;
+      # nixlock is the locker, this only ever feeds it frames. See home/kiosk.nix's own header.
       homeManagerModules.kiosk = ./home/kiosk.nix;
       homeManagerModules.default = self.homeManagerModules.kiosk;
 

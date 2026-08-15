@@ -1,44 +1,29 @@
-# The nixwatch-kiosk build, shared by flake.nix's `packages` output. Mirrors nixlock's own
-# package.nix (same rustPlatform.buildRustPackage shape, same three runtime libraries) because
-# this binary links nixlock as a library and inherits its whole runtime link surface.
-{ lib, rustPlatform, pkg-config, wayland, libxkbcommon, pam }:
+# The nixwatch-frames build, shared by flake.nix's `packages` output. A pure Rust socket client
+# now (no nixlock link, no Wayland/PAM), so this is a plain rustPlatform build with no C library
+# link surface and no bindgen -- unlike nixwatch-kiosk before it (see this repo's git history and
+# nixlock's own experiments/README.md #003 for what changed and why).
+{ lib, rustPlatform }:
 
 rustPlatform.buildRustPackage {
-  pname = "nixwatch-kiosk";
+  pname = "nixwatch-frames";
   version = "0.1.0";
   src = ./.;
 
-  # Cargo.lock is committed so this builds fully offline and reproducibly. `nixlock` is a git
-  # dependency (not published to crates.io -- both crates are `publish = false`), so
-  # importCargoLock needs its fixed-output fetch hash spelled out explicitly here; cargoLock's
-  # normal "derive the hash from the lockfile" path only covers registry deps. Re-run
-  # `cargo generate-lockfile`/`cargo update -p nixlock` after bumping the pinned rev, and refresh
-  # this hash the same way it was minted (see README's build note): start from
-  # `lib.fakeHash`, build, and copy the "got: sha256-..." hash nix prints back in.
-  cargoLock = {
-    lockFile = ./Cargo.lock;
-    outputHashes = {
-      "nixlock-0.1.0" = "sha256-XJ9dGlUqC9touUM5wOn+DMDLk9dZGhXf3G+05IBtye8=";
-    };
-  };
+  # Cargo.lock is committed so this builds fully offline and reproducibly -- importCargoLock
+  # derives its own fixed-output fetch hash straight from the lockfile (every dependency here is
+  # an ordinary crates.io registry dep now, so there is no outputHashes entry to maintain the way
+  # the old nixlock git dependency needed one).
+  cargoLock.lockFile = ./Cargo.lock;
 
-  # pkg-config locates the three C libraries below. bindgenHook is a member of `rustPlatform`
-  # itself, NOT a separate callPackage argument -- pam-sys (via pam-client, pulled in
-  # transitively through nixlock) runs bindgen against <security/pam_appl.h> at build time, and
-  # the hook is what wires up libclang / the right sysroot for that generated FFI.
-  nativeBuildInputs = [ pkg-config rustPlatform.bindgenHook ];
-
-  # nixwatch-kiosk itself only talks HTTP (ureq) and draws into a Vec<u8> (tiny-skia/fontdue) --
-  # every one of these three comes in transitively through linking nixlock: a Wayland client
-  # (wayland), an XKB keymap for the lock-screen fallback on Session outputs (libxkbcommon), and
-  # PAM (pam) for the same fallback's unlock prompt.
-  buildInputs = [ wayland libxkbcommon pam ];
-
+  # One crate: a [lib] (the Gatus model + CPU dashboard renderer + the live-polled `Dashboard`,
+  # all nixlock-free -- see src/lib.rs) plus a default [[bin]] named nixwatch-frames (the socket
+  # client that streams `Dashboard`'s renders to nixlock's kiosk socket). buildRustPackage's
+  # default checkPhase runs `cargo test`; only the binary is installed.
   meta = {
-    description = "Renders the Gatus observability dashboard as nixlock kiosk content";
+    description = "Streams the Gatus observability dashboard to nixlock's kiosk display socket";
     homepage = "https://github.com/julian-corbet/nixwatch-corbet-ch";
     license = lib.licenses.mit;
-    mainProgram = "nixwatch-kiosk";
+    mainProgram = "nixwatch-frames";
     platforms = lib.platforms.linux;
   };
 }

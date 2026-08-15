@@ -1,9 +1,9 @@
 [package]
-name = "nixwatch-kiosk"
+name = "nixwatch-frames"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "Renders the Gatus observability dashboard as nixlock kiosk content"
+description = "Streams the Gatus observability dashboard to nixlock's kiosk display socket"
 homepage = "https://github.com/julian-corbet/nixwatch-corbet-ch"
 publish = false
 
@@ -14,17 +14,18 @@ name = "nixwatch"
 path = "src/lib.rs"
 
 [[bin]]
-name = "nixwatch-kiosk"
-path = "src/bin/nixwatch-kiosk.rs"
+name = "nixwatch-frames"
+path = "src/bin/nixwatch-frames.rs"
 
 [dependencies]
-# The content-agnostic locker this binary is a KioskContent for. Pinned by commit -- there is
-# no crates.io publish (both crates are publish = false), so a git rev is the only source of
-# truth; bump this rev + `cargo update -p nixlock` together when nixlock changes.
-nixlock = { git = "https://github.com/julian-corbet/nixlock-corbet-ch", rev = "54ad9cb16088a605dd7f070b4ca20064ec590517" }
+# NO nixlock dependency. nixwatch-frames is a pure socket CLIENT of nixlock's kiosk display Unix
+# socket (see nixlock's README "Streaming kiosk content" / BEHAVIORS.md DISPLAY-1/DISPLAY-2) --
+# it speaks the wire protocol by hand (src/bin/nixwatch-frames.rs) and links no nixlock code, no
+# Wayland, and no PAM. This is what lets this crate build with plain nix again: no git dependency,
+# no outputHashes, no bindgen.
 
-# CPU rendering: shapes (tiny-skia) + glyph rasterization (fontdue), same stack nixlock itself
-# uses for its own lock screen -- one Pixmap feeds both --dump PNG and the wl_shm kiosk surface.
+# CPU rendering: shapes (tiny-skia) + glyph rasterization (fontdue), the same stack nixlock uses
+# for its own lock screen -- one Pixmap feeds both --dump PNG and the streamed kiosk frames.
 tiny-skia = "0.11"
 fontdue = "0.9"
 
