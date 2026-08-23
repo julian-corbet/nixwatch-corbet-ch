@@ -21,6 +21,10 @@
 #   as `liveness-behavior-proof`) is the same idea for `lib/liveness.nix`'s generated
 #   `nixwatch-is-it-live` script.
 #
+#   A TWO-BOOT VM proof (`checks/timer-reboot.nix`) delays timers.target beyond a check's
+#   interval on both boots, preserving /var between them. It proves the timer still runs in
+#   the second boot rather than becoming `active (elapsed)` against cross-boot state.
+#
 # PLUS `modules-evaluate`: the composed-host check (examples/host/configuration.nix), the
 # same "every real, implemented option, once" shape nixstorage's own checks/default.nix uses.
 #
@@ -105,6 +109,9 @@ in
   inherit eval-tests modules-evaluate;
   behavior-proof = import ./behavior.nix { inherit pkgs lib system; };
   liveness-behavior-proof = import ./liveness-behavior.nix { inherit pkgs lib system; };
+}
+// lib.optionalAttrs (system == "x86_64-linux") {
+  timer-reboot-proof = import ./timer-reboot.nix { inherit pkgs nixwatchModule; };
 }
   // lib.optionalAttrs withCluster {
   cluster-eval = import ./cluster-eval.nix {

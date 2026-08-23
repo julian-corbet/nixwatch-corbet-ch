@@ -146,9 +146,9 @@ in
       default = "5m";
       description = ''
         How often `nixwatch-is-it-live.timer` re-runs the survey, same duration grammar as
-        `nixwatch.checks.<name>.interval` (`lib/duration.nix`). The survey also runs once at
-        boot (`OnBootSec`), so a fresh report exists shortly after boot rather than only after
-        the first full interval has elapsed.
+        `nixwatch.checks.<name>.interval` (`lib/duration.nix`). The survey service itself is
+        started by `multi-user.target`; its timer seeds recurrence relative to timer activation
+        (`OnActiveSec`), so a long initrd cannot consume the first tick before userspace exists.
       '';
     };
 
@@ -254,10 +254,11 @@ in
     systemd.timers.nixwatch-is-it-live = {
       wantedBy = [ "timers.target" ];
       timerConfig = {
-        OnBootSec = cfg.interval;
+        # Same long-initrd-safe seed as the named check timers in modules/default.nix.
+        OnActiveSec = cfg.interval;
         OnUnitActiveSec = cfg.interval;
         RandomizedDelaySec = "30";
-        Persistent = true;
+        Persistent = false;
       };
     };
   };

@@ -455,10 +455,20 @@ in
         lib.nameValuePair "nixwatch-check-${name}" {
           wantedBy = [ "timers.target" ];
           timerConfig = {
-            OnBootSec = check.interval;
+            # Seed recurrence from when THIS timer becomes active, not from kernel boot.
+            # A machine can spend longer than `interval` in its initrd; in that case a
+            # boot-relative seed is already in the past when timers.target is reached. With
+            # a persistent stamp from the previous boot, systemd can then leave the timer
+            # active(elapsed), and OnUnitActiveSec has no current-boot activation to anchor
+            # to -- the check never runs once. OnActiveSec always supplies that first
+            # current-boot activation regardless of how long pre-userspace boot took.
+            OnActiveSec = check.interval;
             OnUnitActiveSec = check.interval;
             RandomizedDelaySec = toString jitterSeconds;
-            Persistent = true;
+            # Persistent= is a catch-up mechanism for OnCalendar timers. These are monotonic
+            # interval timers: their state machine already measures real elapsed health, and
+            # replaying a missed tick after power-off says nothing about present health.
+            Persistent = false;
           };
         })
       cfg.checks;

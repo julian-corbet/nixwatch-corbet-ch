@@ -256,4 +256,20 @@ in
       })
     )
     "a check's channel must never be validated against nixpush.channels when nixpush is not imported into the composed system at all")
+
+  # --- timer bootstrap: recurrence must start even when userspace begins late ---------------
+  (check "checks/timer-seeds-from-activation-not-kernel-boot"
+    (
+      let
+        timer = (evalNixwatch {
+          nixwatch.enable = true;
+          nixwatch.checks.example = validCheck;
+        }).systemd.timers.nixwatch-check-example.timerConfig;
+      in
+      timer.OnActiveSec == validCheck.interval
+      && timer.OnUnitActiveSec == validCheck.interval
+      && !(timer ? OnBootSec)
+      && timer.Persistent == false
+    )
+    "a check timer must seed from its own activation, recur from unit activation, avoid a kernel-boot-relative seed, and carry no persistent cross-boot stamp")
 ]

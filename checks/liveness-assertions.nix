@@ -164,4 +164,22 @@ in
       })
     )
     "a host using nixwatch.checks but never touching nixwatch.liveness at all should never fail the build")
+
+  # --- timer bootstrap follows the same long-initrd-safe contract as named checks -----------
+  (check "liveness/timer-seeds-from-activation-not-kernel-boot"
+    (
+      let
+        timer = (evalNixwatch {
+          nixwatch.enable = true;
+          nixwatch.liveness.enable = true;
+          nixwatch.liveness.interval = "10m";
+          nixwatch.liveness.subjects.example = validSubject;
+        }).systemd.timers.nixwatch-is-it-live.timerConfig;
+      in
+      timer.OnActiveSec == "10m"
+      && timer.OnUnitActiveSec == "10m"
+      && !(timer ? OnBootSec)
+      && timer.Persistent == false
+    )
+    "the is-it-live timer must seed from its own activation, recur from unit activation, avoid a kernel-boot-relative seed, and carry no persistent cross-boot stamp")
 ]
