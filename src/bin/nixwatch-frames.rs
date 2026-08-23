@@ -1,4 +1,4 @@
-// nixwatch-frames [--dump <out.png>] [--source <file|url>]
+// nixwatch-frames [--version|-V] [--dump <out.png>] [--source <file|url>]
 //
 // A socket CLIENT for nixlock's kiosk display socket (nixlock's own `crate::socket`, documented
 // in its README's "Streaming kiosk content" and BEHAVIORS.md's DISPLAY-1/DISPLAY-2). It connects
@@ -116,6 +116,14 @@ fn arg(flag: &str) -> Option<String> {
 }
 
 fn main() {
+    // Version discovery must be safe for packaging and monitoring probes: answer before reading
+    // config, resolving a runtime socket, constructing the dashboard, or doing any I/O beyond
+    // stdout. Keep both spellings expected of a conventional command-line program.
+    if std::env::args().any(|arg| arg == "--version" || arg == "-V") {
+        println!("nixwatch-frames {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+
     if let Some(out) = arg("--dump") {
         let gatus_url = resolve_gatus_url(&load_file_config());
         let source = arg("--source").unwrap_or(gatus_url);
