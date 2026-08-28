@@ -47,17 +47,6 @@ let
     map (a: a.message)
       (lib.filter (a: !a.assertion) (mkEnv values).config.nixidy.assertions);
 
-  # Cross-root layout and delivery invariants now belong to the shared factory. A bad declaration
-  # must therefore produce one factory diagnostic, not one from the factory and one from a retired
-  # local translator.
-  failsExactlyOnceWith = infix: values:
-    let
-      result = builtins.tryEval (lib.length (lib.filter
-        (assertion: !assertion.assertion && lib.hasInfix infix assertion.message)
-        (mkEnv values).config.nixidy.assertions));
-    in
-    result.success && result.value == 1;
-
   sorted = lib.sort (a: b: a < b);
 
   catalogue = import ../lib/observability.nix { };
@@ -141,10 +130,6 @@ let
   };
 
   goodCfg = (mkEnv good).config;
-
-  referenceCfg = (mkEnv (lib.recursiveUpdate good {
-    nixwatch.cluster.metrics.example-metrics-stack.manifests = [ ];
-  })).config;
 
   # The address the module derives for the metrics store, written out here exactly as a person
   # would if they were about to make the mistake this repository exists to refuse.
@@ -379,29 +364,6 @@ let
     # this module, on either path.
     workload-given-a-replica-count =
       lib.recursiveUpdate good { nixwatch.cluster.metrics.example-metrics.replicas = 2; };
-
-    # The factory's wider generic vocabulary must not silently widen nixwatch's established
-    # declaration contract. These remain unknown/type-invalid at the public nested path.
-    workload-given-factory-resources =
-      lib.recursiveUpdate good {
-        nixwatch.cluster.metrics.example-metrics.resources.cpuRequest = "10m";
-      };
-
-    workload-given-factory-state-backing =
-      lib.recursiveUpdate good {
-        nixwatch.cluster.metrics.example-metrics.state.data.emptyDir = true;
-      };
-
-    workload-given-declaration-read-only =
-      lib.recursiveUpdate good {
-        nixwatch.cluster.metrics.example-metrics.state.data.readOnly = true;
-      };
-
-    workload-given-variable-shaped-credentials =
-      lib.recursiveUpdate good {
-        nixwatch.cluster.dashboards.example-dashboard.credentials.keys.GF_SECURITY_ADMIN_PASSWORD =
-          "password";
-      };
   };
 
   wronglyRendered =
@@ -464,8 +426,6 @@ let
       && emptyCfg.nixwatch.cluster.alarmPath == [ ]
       && emptyCfg.nixwatch.cluster.renderedByGrammar == [ ]
       && emptyCfg.nixwatch.cluster.renderedDirectly == [ ]
-      && emptyCfg.nixwatch.cluster.notRendered == [ ]
-      && emptyCfg.nixwatch.cluster.clusterSlots == { }
       && emptyCfg.nixwatch.cluster.slots == { }
       && emptyCfg.nixwatch.cluster.retention == { };
 
@@ -480,10 +440,6 @@ let
       == [ "example-dashboard" "example-logs" "example-metrics" "example-metrics-stack" "example-shipper" "example-traces" ]
       && goodCfg.nixwatch.cluster.alarmPath == [ "example-status" ];
 
-    "the factory inhabits the established nested option path without a sibling mirror" =
-      goodCfg.nixwatch.cluster.metrics.example-metrics.store == "victoria-metrics"
-      && !(goodCfg.nixwatch ? metrics);
-
     "a workload's namespace is its PATH's, and nothing declared it" =
       goodCfg.nixk3s.apps.example-metrics.namespace == "example-observability"
       && goodCfg.nixk3s.apps.example-dashboard.namespace == "example-observability"
@@ -494,13 +450,7 @@ let
       sorted goodCfg.nixwatch.cluster.renderedByGrammar
       == [ "example-dashboard" "example-logs" "example-metrics" "example-status" "example-traces" ]
       && sorted goodCfg.nixwatch.cluster.renderedDirectly
-      == [ "example-metrics-stack" "example-shipper" ]
-      && goodCfg.nixwatch.cluster.notRendered == [ ];
-
-    "a chart left to an external Application is projected as a reference, not a rendered object" =
-      referenceCfg.nixwatch.cluster.notRendered == [ "example-metrics-stack" ]
-      && referenceCfg.nixwatch.cluster.renderedDirectly == [ "example-shipper" ]
-      && !(referenceCfg.applications ? example-metrics-stack);
+      == [ "example-metrics-stack" "example-shipper" ];
 
     # ── WHAT EACH PILLAR COSTS TO KEEP, in three genuinely different units ────────────────────
     "the three pillars report three different growth terms, not one shared number" =
@@ -563,8 +513,7 @@ let
 
     # ── ADDRESSABILITY: two things a person opens, four things only components talk to ────────
     "only the two workloads a person opens can hold a slot at all" =
-      goodCfg.nixwatch.cluster.slots == { example-dashboard = 96; example-status = 97; }
-      && goodCfg.nixwatch.cluster.clusterSlots == goodCfg.nixwatch.cluster.slots;
+      goodCfg.nixwatch.cluster.slots == { example-dashboard = 96; example-status = 97; };
 
     "everything else is unaddressed STRUCTURALLY -- there is no slot option on any of them" =
       sorted goodCfg.nixwatch.cluster.unaddressed
@@ -655,26 +604,6 @@ let
 
     "the separations are structural: every one of them is an unknown option" =
       wronglyAccepted == [ ];
-
-    "the factory is the single cross-root slot-collision authority" =
-      failsExactlyOnceWith "slot 96 is claimed by 2 workloads"
-        mustFail.two-workloads-on-one-slot;
-
-    "the factory is the single namespace-anchor collision authority" =
-      failsExactlyOnceWith "namespace `example-observability` is anchored by 2 workloads"
-        mustFail.two-workloads-creating-one-namespace;
-
-    "the factory is the single direct-delivery namespace-safety authority" =
-      failsExactlyOnceWith "non-grammar renderer cannot stamp"
-        mustFail.directly-rendered-workload-anchoring-a-namespace;
-
-    "the factory is the single typed-app manifest authority" =
-      failsExactlyOnceWith "rendered in full by the app grammar and also carries whole manifests"
-        mustFail.image-delivered-workload-passing-verbatim-objects;
-
-    "the factory is the single cross-root declaration-name authority" =
-      failsExactlyOnceWith "declaration name `example-logs` appears in more than one root"
-        mustFail.one-name-declared-in-two-groups;
 
     # THE MESSAGE THAT HAS TO DO THE MOST WORK. Somebody wrote that line believing it reasonable.
     "the cross-path refusal quotes the rule, names the field, and names what it pointed at" =

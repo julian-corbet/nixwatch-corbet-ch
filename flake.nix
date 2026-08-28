@@ -9,9 +9,14 @@
     # input" convention this design-system family uses between PEER repos, reserved for
     # genuinely lower layers instead (this family's own examples: nixvps, nixtest).
 
-    # nixidy remains checks-only. nixk3s supplies both the real grammar used by those checks and
-    # the shared consumer factory that constructs the exported cluster module. The host modules
-    # still reach into neither input.
+    # CHECKS-ONLY, both of them, and that is the point being proven rather than a shortcut. A
+    # consumer of the cluster half imports the app grammar itself, exactly as it imports this
+    # flake; these inputs exist so `nix flake check` can render modules/cluster.nix through the
+    # REAL grammar and the REAL renderer and then assert the manifests that come out -- instead
+    # of asserting that a module which merely mentions `nixk3s.apps` evaluates.
+    #
+    # Nothing this flake EXPORTS reaches into either of them, so a host importing
+    # `nixosModules.nixwatch` never pulls a renderer into its closure.
     nixidy = {
       url = "github:arnarg/nixidy";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -56,9 +61,7 @@
       # this module defines into -- see modules/cluster.nix's own header. The two halves share no
       # evaluation, which is the strongest possible form of "the alarm path does not depend on the
       # observability path": there is no import between them in either direction.
-      nixidyModules.nixwatch = import ./modules/cluster.nix {
-        mkConsumerModule = nixk3s.lib.mkConsumerModule;
-      };
+      nixidyModules.nixwatch = ./modules/cluster.nix;
       nixidyModules.default = self.nixidyModules.nixwatch;
 
       # The cluster catalogue, for inspection without re-reading the file.
