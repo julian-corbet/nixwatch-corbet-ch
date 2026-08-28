@@ -65,11 +65,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1786142562,
-        "narHash": "sha256-F/0GzAFiffEIjvWciUgZyHYuYEdvJX4rLx93SvtoCxg=",
+        "lastModified": 1787941400,
+        "narHash": "sha256-uXa5RBOrXgkpFoXFedBP1Rgg1sNgd/AFNtYGRMe87+o=",
         "owner": "julian-corbet",
         "repo": "nixk3s-corbet-ch",
-        "rev": "3dbb14c9ed5ec5c9ce69a6d3e3bebab86d0b116b",
+        "rev": "751186e42506a9bd3177f75f1e6a528bbb2a3af3",
         "type": "github"
       },
       "original": {
