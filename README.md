@@ -371,11 +371,12 @@ timers, outside every cluster. Declaring a status pane is never a reason to stop
 
 ### What it renders, and what it does not
 
-Everything expressible as an app is defined into `nixk3s.apps` and rendered by that grammar: a
-Deployment, a Service (a store still needs an in-cluster address), an optional Namespace. What the
-grammar has no term for — a vendor's whole-stack chart, a per-node DaemonSet — is delivered as
-whole objects one level below it, with server-side apply and diff, and listed in
-`nixwatch.cluster.renderedDirectly` so the untyped surface is countable.
+The cluster module configures nixk3s's shared catalogue-consumer factory at the existing nested
+`nixwatch.cluster` option path. Its six roots dispatch image deliveries into `nixk3s.apps`, where
+the grammar renders a Deployment, Service and optional Namespace. What the grammar has no term for
+— a vendor's whole-stack chart, a per-node DaemonSet — is dispatched as whole objects one level
+below it, with server-side apply and diff, and listed in `nixwatch.cluster.renderedDirectly` so the
+untyped surface is countable.
 
 A chart-delivered store is still declarable, and still accounted for in the retention report — but
 **a dashboard or a shipper naming one is refused**, because a chart names its own Services from its
@@ -679,7 +680,9 @@ module class — `nixidyModules`, not `nixosModules` — and a different evaluat
 - Read-only reports: `retention` (what each pillar costs to keep, and whether the number is
   enforced), `dashboardSources`, `shipperTargets`, `proberTargets` (all derived, published for the
   configuration files this module does not render), `observabilityPath` / `alarmPath`,
-  `unaddressed`, `slots`, `renderedByGrammar` / `renderedDirectly`.
+  `unaddressed`, `slots`, `renderedByGrammar` / `renderedDirectly`. The shared factory additionally
+  publishes `clusterSlots` (the same slot facts in its common report) and `notRendered` (chart
+  declarations deliberately delivered by another Application).
 
 ## The one non-negotiable assertion
 
@@ -703,7 +706,7 @@ it fires when violated and stays silent when satisfied.
 | `lib/runner.nix` | the pure per-check script builder (`mkCheckRunner`) — the actual probe/heartbeat/gate/alert-on-transition logic, callable standalone |
 | `modules/liveness.nix` | `nixwatch.liveness.*` option schema, assertions, systemd wiring for the is-it-live survey — imported by `modules/default.nix` |
 | `lib/liveness.nix` | the pure is-it-live report builder (`mkLivenessReport`) — reads a health document or a verify unit per subject, callable standalone |
-| `modules/cluster.nix` | `nixwatch.cluster.*` — the six workload groups, every guard, and the translation into the app grammar. Renders no Kubernetes object of its own |
+| `modules/cluster.nix` | Configures nixk3s's multi-root consumer factory at `nixwatch.cluster.*`, retaining only nixwatch's path, cost, relationship, credential and reporting adapters. Renders no Kubernetes object of its own |
 | `lib/observability.nix` | the cluster catalogue: what each piece of software IS — its path, its delivery, its ports, the directories it cannot lose, how its retention reaches it. Knowledge, never values |
 | `examples/host/` | a minimal composed system exercising every implemented option, with NO nixpush present — used by `nix flake check` |
 | `examples/cluster/` | one complete declaration on both paths, with all three pillars — rendered and asserted field by field by `nix flake check` |
@@ -771,10 +774,9 @@ common design system:
 mechanism every alert and heartbeat this module raises actually travels through — named by
 string, never a flake input; see
 [Why nixwatch depends on nixpush](#why-nixwatch-depends-on-nixpush-and-never-as-a-flake-input)),
-[nixk3s](https://github.com/julian-corbet/nixk3s-corbet-ch) (the app grammar the observability
-half declares into, and the band model that governs which slots its two reachable workloads may
-take — imported by a consumer directly, and a checks-only input here so `nix flake check` can
-render through the real thing),
+[nixk3s](https://github.com/julian-corbet/nixk3s-corbet-ch) (the app grammar, shared consumer
+factory, and band model governing the two reachable workloads' slots — a consumer still composes
+the grammar directly, while this flake closes its exported cluster module over the matching factory),
 [nixstorage](https://github.com/julian-corbet/nixstorage-corbet-ch) (a sibling in spirit —
 the same "hard-won rules as enforced modules, not documentation to remember" shape, and the
 same "read a sibling's config defensively, never as a flake input" convention this repo
