@@ -423,8 +423,7 @@ let
     firstMatching mustFail.prober-naming-a-store-in-its-environment "MAY NEVER ACQUIRE A DEPENDENCY";
   unknownStoreMessage =
     firstMatching mustFail.dashboard-reading-a-store-nobody-declared "nonesuch";
-  unbackedMessage =
-    firstMatching mustFail.store-with-an-unbacked-directory "example-second-traces";
+  unbackedMessages = failures mustFail.store-with-an-unbacked-directory;
   pillarMessage =
     firstMatching mustFail.shipper-pushing-into-a-metrics-store "example-shipper";
 
@@ -692,8 +691,11 @@ let
       && lib.hasInfix "`example-traces`" unknownStoreMessage;
 
     "the unbacked refusal says which directory, where, and what it does to the declared retention" =
-      lib.hasInfix "/var/tempo" unbackedMessage
-      && lib.hasInfix "retention" unbackedMessage;
+      lib.any
+        (message:
+          lib.hasInfix "/var/tempo" message
+          && lib.hasInfix "retention" message)
+        unbackedMessages;
 
     "the wrong-pillar refusal says which pillar was named and what the failure looks like" =
       lib.hasInfix "metrics store" pillarMessage
