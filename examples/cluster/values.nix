@@ -62,6 +62,9 @@
       # Deliberately tag-only, so the render sees the grammar's unpinned-image warning fire as well
       # as the digest-pinned path further down.
       version = "0.0.0";
+      # This declaration is taking over an existing grammar-rendered workload, so its Application
+      # compares and applies through the API server during the adoption window.
+      adopt = true;
       createNamespace = true;
       # Retention and cardinality: the two numbers that multiply into what this pillar costs. The
       # retention reaches the process as an argument this module renders.

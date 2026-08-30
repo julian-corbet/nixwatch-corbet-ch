@@ -77,6 +77,7 @@ let
       example-metrics = {
         store = "victoria-metrics";
         version = "0.0.0";
+        adopt = true;
         createNamespace = true;
         retention = "30d";
         activeSeries = 500000;
@@ -287,6 +288,15 @@ let
     chart-delivered-workload-naming-an-image =
       lib.recursiveUpdate good { nixwatch.cluster.shippers.example-shipper.image = "example/image:0.0.0"; };
 
+    chart-delivered-workload-claiming-adoption =
+      lib.recursiveUpdate good { nixwatch.cluster.shippers.example-shipper.adopt = true; };
+
+    externally-delivered-chart-claiming-adoption =
+      lib.recursiveUpdate good {
+        nixwatch.cluster.metrics.example-metrics-stack.manifests = [ ];
+        nixwatch.cluster.metrics.example-metrics-stack.adopt = true;
+      };
+
     image-delivered-workload-naming-neither-version-nor-image =
       lib.recursiveUpdate good { nixwatch.cluster.traces.example-traces.version = null; };
 
@@ -473,6 +483,13 @@ let
 
     # ── The control ───────────────────────────────────────────────────────────────────────────
     "a declaration covering all three pillars and both paths renders" = renders good;
+
+    "adoption reaches exactly the image declaration that asked for it" =
+      goodCfg.nixk3s.apps.example-metrics.adopt
+      && !goodCfg.nixk3s.apps.example-logs.adopt
+      && !goodCfg.nixk3s.apps.example-traces.adopt
+      && !goodCfg.nixk3s.apps.example-dashboard.adopt
+      && !goodCfg.nixk3s.apps.example-status.adopt;
 
     "the two paths are exactly the workloads their catalogue entries put there" =
       sorted goodCfg.nixwatch.cluster.observabilityPath
@@ -670,6 +687,14 @@ let
     "the factory is the single typed-app manifest authority" =
       failsExactlyOnceWith "rendered in full by the app grammar and also carries whole manifests"
         mustFail.image-delivered-workload-passing-verbatim-objects;
+
+    "a directly rendered chart cannot pretend its unconditional delivery policy is adoption" =
+      failsExactlyOnceWith "already use server-side apply and server-side diff unconditionally"
+        mustFail.chart-delivered-workload-claiming-adoption;
+
+    "an externally rendered chart cannot claim to adopt an Application it does not render" =
+      failsExactlyOnceWith "renders nothing to adopt"
+        mustFail.externally-delivered-chart-claiming-adoption;
 
     "the factory is the single cross-root declaration-name authority" =
       failsExactlyOnceWith "declaration name `example-logs` appears in more than one root"

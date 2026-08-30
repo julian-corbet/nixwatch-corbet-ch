@@ -210,8 +210,12 @@ pkgs.runCommand "nixwatch-cluster-render"
     check "$app: SSD" "ServerSideDiff=true" \
       "$(y '.metadata.annotations."argocd.argoproj.io/compare-options"' $manifests/apps/Application-$app.yaml)"
   done
-  check "and NOT on an ordinary rendered workload" "null" \
-    "$(y '.spec.syncPolicy.syncOptions' $manifests/apps/Application-example-metrics.yaml)"
+  check "an adopted grammar workload also gets SSA" "ServerSideApply=true" \
+    "$(y '.spec.syncPolicy.syncOptions[0]' $manifests/apps/Application-example-metrics.yaml)"
+  check "and server-side diff" "ServerSideDiff=true" \
+    "$(y '.metadata.annotations."argocd.argoproj.io/compare-options"' $manifests/apps/Application-example-metrics.yaml)"
+  check "an ordinary grammar workload gets neither" "null" \
+    "$(y '.spec.syncPolicy.syncOptions' $manifests/apps/Application-example-logs.yaml)"
 
   echo
   echo "== the two paths and the render split are countable =="

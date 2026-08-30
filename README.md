@@ -545,6 +545,7 @@ nixwatch.cluster.platform = {
 nixwatch.cluster.metrics.example-metrics = {
   store = "victoria-metrics";
   version = "0.0.0";
+  adopt = true;                          # only while taking over existing objects
   retention = "30d";                     # reaches this store as an argument
   activeSeries = 500000;                 # what a metrics store actually costs
   state.data.hostPath = "/example/state/metrics";
@@ -667,8 +668,10 @@ module class — `nixidyModules`, not `nixosModules` — and a different evaluat
 - `metrics.<name>` / `logs.<name>` / `traces.<name>` — the three pillars, one group each. All share
   `store` (from the catalogue), `retention` (required, and refused without a unit — it is passed
   verbatim to a program with its own default unit), `state`, `version`/`image`, `credentials`,
-  `env`, `args`, `manifests`. Each adds exactly one growth term: `activeSeries`,
-  `ingestMiBPerDay`, `sampledPercent` (1–100). None of the three has the other two's.
+  `env`, `args`, `manifests`, `adopt`. `adopt` is meaningful only for image deliveries rendered
+  through the app grammar; chart deliveries are refused because they either use server-side
+  apply/diff unconditionally or render nothing here. Each pillar adds exactly one growth term:
+  `activeSeries`, `ingestMiBPerDay`, `sampledPercent` (1–100). None of the three has the other two's.
 - `shippers.<name>` — `shipper` (from the catalogue) and `ships`, the name of a declared LOG store.
   No `retention`, no growth term, no `exposure`, no `slot`: a shipper keeps nothing and is dialled
   by nothing.

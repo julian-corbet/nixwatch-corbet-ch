@@ -187,6 +187,20 @@ let
     ])
     allWorkloads;
 
+  # `adopt` is a switch on the app grammar's Application. Chart deliveries never pass through
+  # that renderer: a manifest Application already carries SSA/SSD unconditionally, while a
+  # reference renders no Application at all. Refuse the otherwise-silent spelling on both shapes.
+  adoptionAssertions = lib.concatMap
+    (x: lib.optionals (deliveryOf x != "image") [{
+      assertion = !x.w.adopt;
+      message =
+        "nixwatch: `${x.name}` is delivered as its vendor's chart and sets `adopt`. Chart objects "
+        + (if x.w.manifests == [ ]
+          then "are delivered by another Application, so this declaration renders nothing to adopt."
+          else "already use server-side apply and server-side diff unconditionally; `adopt` would change nothing.");
+    }])
+    allWorkloads;
+
   # Keep nixwatch's richer state sentence beside the factory's general state guards: for a telemetry
   # store the important consequence is that declared retention becomes fiction.
   storageAssertions = lib.concatMap
@@ -353,6 +367,7 @@ let
 
   domainAssertions =
     chartDeliveryAssertions
+    ++ adoptionAssertions
     ++ storageAssertions
     ++ credentialAssertions
     ++ costAssertions
@@ -654,6 +669,7 @@ let
     "env"
     "args"
     "manifests"
+    "adopt"
   ];
 
   frontedEnabledOptions = commonEnabledOptions ++ [ "exposure" "slot" ];
