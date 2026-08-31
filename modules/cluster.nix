@@ -624,11 +624,6 @@ let
     };
   };
 
-  namespaceOption = lib.mkOption {
-    type = lib.types.str;
-    description = "Default namespace for observability-path workloads that do not select one.";
-  };
-
   alarmNamespaceOption = lib.mkOption {
     type = lib.types.str;
     description = "Separate namespace for every alarm-path workload.";
@@ -806,7 +801,6 @@ let
     };
 
     extraPlatformOptions = {
-      namespace = namespaceOption;
       alarmNamespace = alarmNamespaceOption;
       clusterDomain = clusterDomainOption;
     };
