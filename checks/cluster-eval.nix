@@ -103,6 +103,7 @@ let
     nixwatch.cluster.traces.example-traces = {
       store = "tempo";
       version = "0.0.0";
+      namespace = "example-traces";
       retention = "3d";
       sampledPercent = 10;
       state.data.hostPath = "/example/state/traces";
@@ -172,10 +173,10 @@ let
           "${metricsAddress}/health";
       };
 
-    prober-pointed-anywhere-in-the-observability-namespace =
+    prober-pointed-anywhere-in-an-observability-namespace =
       lib.recursiveUpdate good {
         nixwatch.cluster.probers.example-status.targets.example-something.url =
-          "http://something-else.example-observability.svc.cluster.local:9000/ready";
+          "http://something-else.example-traces.svc.cluster.local:9000/ready";
       };
 
     prober-naming-a-store-in-its-environment =
@@ -303,6 +304,11 @@ let
     one-namespace-for-both-paths =
       lib.recursiveUpdate good { nixwatch.cluster.platform.alarmNamespace = "example-observability"; };
 
+    observability-workload-placed-in-the-alarm-namespace =
+      lib.recursiveUpdate good {
+        nixwatch.cluster.traces.example-traces.namespace = "example-status";
+      };
+
     # ── Delivery ────────────────────────────────────────────────────────────────────────────────
     image-delivered-workload-passing-verbatim-objects =
       lib.recursiveUpdate good {
@@ -323,6 +329,11 @@ let
       lib.recursiveUpdate good {
         nixwatch.cluster.metrics.example-metrics-stack.manifests = [ ];
         nixwatch.cluster.metrics.example-metrics-stack.adopt = true;
+      };
+
+    chart-delivered-workload-selecting-a-report-only-namespace =
+      lib.recursiveUpdate good {
+        nixwatch.cluster.metrics.example-metrics-stack.namespace = "example-chart-only";
       };
 
     image-delivered-workload-naming-neither-version-nor-image =
@@ -381,9 +392,6 @@ let
 
     shipper-given-a-slot =
       lib.recursiveUpdate good { nixwatch.cluster.shippers.example-shipper.slot = 98; };
-
-    store-given-its-own-namespace =
-      lib.recursiveUpdate good { nixwatch.cluster.logs.example-logs.namespace = "example-somewhere-else"; };
 
     prober-given-its-own-namespace =
       lib.recursiveUpdate good { nixwatch.cluster.probers.example-status.namespace = "example-somewhere-else"; };
@@ -529,9 +537,10 @@ let
       goodCfg.nixwatch.cluster.metrics.example-metrics.store == "victoria-metrics"
       && !(goodCfg.nixwatch ? metrics);
 
-    "a workload's namespace is its PATH's, and nothing declared it" =
+    "observability workloads may select a private namespace while the alarm path cannot" =
       goodCfg.nixk3s.apps.example-metrics.namespace == "example-observability"
       && goodCfg.nixk3s.apps.example-dashboard.namespace == "example-observability"
+      && goodCfg.nixk3s.apps.example-traces.namespace == "example-traces"
       && goodCfg.applications.example-shipper.namespace == "example-observability"
       && goodCfg.nixk3s.apps.example-status.namespace == "example-status";
 
@@ -591,7 +600,7 @@ let
     # doing both jobs would have put a reader on the write path.
     "a reader gets the store's QUERY port, which is not always the port writers use" =
       goodCfg.nixwatch.cluster.dashboardSources.example-dashboard.example-traces.url
-      == "http://example-traces.example-observability.svc.cluster.local:3200"
+      == "http://example-traces.example-traces.svc.cluster.local:3200"
       && catalogue.traces.tempo.ports.${catalogue.traces.tempo.writePort} == 4317
       && catalogue.traces.tempo.ports.otlp-http == 4318;
 

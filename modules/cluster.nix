@@ -45,7 +45,9 @@ let
 
   resolvedNamespaceOf = x:
     let selectedPlatform = x.platform or platform; in
-    if pathOf x == "alarm" then selectedPlatform.alarmNamespace else selectedPlatform.namespace;
+    if pathOf x == "alarm" then selectedPlatform.alarmNamespace else x.w.namespace;
+
+  observabilityNamespaces = lib.unique (map resolvedNamespaceOf onObservability);
 
   deliveryOf = x: x.entry.delivery;
   hostOf = x: "${x.name}.${resolvedNamespaceOf x}.svc.${platform.clusterDomain}";
@@ -89,10 +91,12 @@ let
       what = "the in-cluster address of `${x.name}`";
       needle = hostOf x;
     }) onObservability
-    ++ lib.optional (onObservability != [ ]) {
-      what = "the observability path's own namespace (`${platform.namespace}`)";
-      needle = ".${platform.namespace}.svc";
-    }
+    ++ map
+      (namespace: {
+        what = "an observability-path namespace (`${namespace}`)";
+        needle = ".${namespace}.svc";
+      })
+      observabilityNamespaces
     ++ lib.concatMap
       (x: map
         (form: { what = "`${x.name}`, by name"; inherit (form) needle; })
@@ -404,11 +408,23 @@ let
     (workloadsOfKind "probers");
 
   pathAssertions = lib.optional (onAlarm != [ ] && onObservability != [ ]) {
-    assertion = platform.namespace != platform.alarmNamespace;
+    assertion = !(lib.elem platform.alarmNamespace observabilityNamespaces);
     message =
-      "nixwatch: `nixwatch.cluster.platform.namespace` and `...alarmNamespace` are the same "
-      + "namespace. The alarm and observability paths must not share fate.";
+      "nixwatch: alarm namespace `${platform.alarmNamespace}` is also used by the observability "
+      + "path. The alarm and observability paths must not share fate; move every store, shipper "
+      + "and dashboard out of the alarm namespace.";
   };
+
+  namespaceAssertions = lib.concatMap
+    (x: lib.optional (pathOf x == "observability" && deliveryOf x != "image") {
+      assertion = x.w.namespace == platform.namespace;
+      message =
+        "nixwatch: `${x.name}` selects namespace `${x.w.namespace}`, but its whole objects are "
+        + "delivered as a chart or manifest and already carry their own namespaces. A namespace "
+        + "choice here would change derived reports without changing any object; keep the platform "
+        + "default or change the chart delivery itself.";
+    })
+    allWorkloads;
 
   domainAssertions =
     chartDeliveryAssertions
@@ -419,7 +435,8 @@ let
     ++ dashboardAssertions
     ++ shipperAssertions
     ++ proberAssertions
-    ++ pathAssertions;
+    ++ pathAssertions
+    ++ namespaceAssertions;
 
   domainWarnings = lib.concatMap
     (x: [
@@ -609,7 +626,7 @@ let
 
   namespaceOption = lib.mkOption {
     type = lib.types.str;
-    description = "Namespace for every observability-path workload.";
+    description = "Default namespace for observability-path workloads that do not select one.";
   };
 
   alarmNamespaceOption = lib.mkOption {
@@ -723,7 +740,9 @@ let
     "adopt"
   ];
 
-  frontedEnabledOptions = commonEnabledOptions ++ [ "exposure" "slot" ];
+  observabilityEnabledOptions = commonEnabledOptions ++ [ "namespace" ];
+  frontedObservabilityEnabledOptions = observabilityEnabledOptions ++ [ "exposure" "slot" ];
+  frontedAlarmEnabledOptions = commonEnabledOptions ++ [ "exposure" "slot" ];
 
   mkRoot = { catalogueSet, selectorName, enabled, optionsSet, description }: {
     catalogue = catalogueSet;
@@ -745,42 +764,42 @@ let
       metrics = mkRoot {
         catalogueSet = catalogue.metrics;
         selectorName = "store";
-        enabled = commonEnabledOptions;
+        enabled = observabilityEnabledOptions;
         optionsSet = metricsOptions;
         description = "Metrics stores, keyed by declaration name.";
       };
       logs = mkRoot {
         catalogueSet = catalogue.logs;
         selectorName = "store";
-        enabled = commonEnabledOptions;
+        enabled = observabilityEnabledOptions;
         optionsSet = logsOptions;
         description = "Log stores, keyed by declaration name.";
       };
       traces = mkRoot {
         catalogueSet = catalogue.traces;
         selectorName = "store";
-        enabled = commonEnabledOptions;
+        enabled = observabilityEnabledOptions;
         optionsSet = tracesOptions;
         description = "Trace stores, keyed by declaration name.";
       };
       shippers = mkRoot {
         catalogueSet = catalogue.shippers;
         selectorName = "shipper";
-        enabled = commonEnabledOptions;
+        enabled = observabilityEnabledOptions;
         optionsSet = shippersOptions;
         description = "Log shippers, keyed by declaration name.";
       };
       dashboards = mkRoot {
         catalogueSet = catalogue.dashboards;
         selectorName = "dashboard";
-        enabled = frontedEnabledOptions;
+        enabled = frontedObservabilityEnabledOptions;
         optionsSet = dashboardsOptions;
         description = "Dashboards, keyed by declaration name.";
       };
       probers = mkRoot {
         catalogueSet = catalogue.probers;
         selectorName = "prober";
-        enabled = frontedEnabledOptions;
+        enabled = frontedAlarmEnabledOptions;
         optionsSet = probersOptions;
         description = "Active black-box probers, keyed by declaration name.";
       };

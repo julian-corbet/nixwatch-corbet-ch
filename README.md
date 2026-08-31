@@ -61,7 +61,7 @@ quietly moved itself inside the thing it was supposed to be outside of.
 
 The two halves are also two evaluations that never meet: the alarm half is a NixOS module and the
 observability half is a cluster module, and neither imports the other in either direction. Inside
-the cluster half — where the prober and the stores DO share one file, one namespace scheme and one
+the cluster half — where the prober and the stores DO share one file, one namespace contract and one
 render — that rule stops being a convention and becomes four structural refusals; see
 [the one-directional rule, in the cluster](#the-one-directional-rule-in-the-cluster).
 
@@ -331,8 +331,9 @@ renders one Deployment per app), so its objects arrive whole, like a chart's.
 ### The dashboard names stores, never addresses
 
 `dashboards.<name>.reads` is a list of declared store names. There is no URL option on a dashboard
-anywhere in this module: every data-source address is DERIVED from the store's own name, the
-observability namespace, the cluster domain and the port its catalogue entry says readers query on
+anywhere in this module: every data-source address is DERIVED from the store's own name, its
+resolved observability-path namespace, the cluster domain and the port its catalogue entry says
+readers query on
 (which is not always the port writers push to). A dashboard naming a store nobody declared fails
 eval, listing the stores that do exist.
 
@@ -350,8 +351,10 @@ are one line away. Four levels, only two of which are code that runs:
 
 1. **A workload's path is not declarable.** `alarm` or `observability` is a property of the
    software, read from the catalogue.
-2. **There is no `namespace` option anywhere.** A workload's namespace is its path's, and the two
-   namespaces are separate, defaultless options that must differ.
+2. **Only image-delivered observability workloads can select a namespace.** They default to
+   `platform.namespace` and may select another private namespace; a chart or manifest already owns
+   the namespace in its objects, and the alarm path has no such option. Every resolved
+   observability namespace is refused if it equals `alarmNamespace`.
 3. **An alarm-path workload has no option that could name a store.** `reads` belongs to dashboards
    and `ships` to shippers; on a prober both are "the option does not exist".
 4. **Every free-text string a prober carries is scanned** — its targets, its environment, its
@@ -554,6 +557,7 @@ nixwatch.cluster.metrics.example-metrics = {
 nixwatch.cluster.logs.example-logs = {
   store = "loki";
   version = "0.0.0";
+  namespace = "example-logs";           # optional private placement
   retention = "14d";
   ingestMiBPerDay = 2048;                # what a log store actually costs
   state.data.hostPath = "/example/state/logs";
@@ -659,24 +663,29 @@ above for the full picture):
 [The observability half](#the-observability-half-declared) above for the full picture). A different
 module class — `nixidyModules`, not `nixosModules` — and a different evaluation:
 
-- `platform.namespace` / `.alarmNamespace` — where the observability path and the alarm path land.
-  Neither is defaulted, both are required the moment a workload of that path is declared, and they
-  must differ. There is no per-workload `namespace` option anywhere.
+- `platform.namespace` / `.alarmNamespace` — the default observability namespace and the fixed
+  alarm-path namespace. Neither is defaulted. Image-delivered observability workloads may select a
+  private `namespace`; chart/manifest deliveries and alarm workloads cannot, and no resolved
+  observability namespace may equal the alarm namespace.
 - `platform.project` / `.clusterDomain` / `.origin` — the delivery project, the internal DNS domain
   every derived address is built from, and the declaring-origin name handed to the band model (null
   unless that model is part of the same render).
 - `metrics.<name>` / `logs.<name>` / `traces.<name>` — the three pillars, one group each. All share
-  `store` (from the catalogue), `retention` (required, and refused without a unit — it is passed
-  verbatim to a program with its own default unit), `state`, `version`/`image`, `credentials`,
-  `env`, `args`, `manifests`, `adopt`. `adopt` is meaningful only for image deliveries rendered
-  through the app grammar; chart deliveries are refused because they either use server-side
+  `store` (from the catalogue), optional private `namespace`, `retention` (required, and refused
+  without a unit — it is passed verbatim to a program with its own default unit), `state`,
+  `version`/`image`, `credentials`, `env`, `args`, `manifests`, `adopt`. Namespace selection and
+  `adopt` are meaningful only for image deliveries rendered through the app grammar; chart
+  deliveries are refused because their whole objects own placement and either use server-side
   apply/diff unconditionally or render nothing here. Each pillar adds exactly one growth term:
   `activeSeries`, `ingestMiBPerDay`, `sampledPercent` (1–100). None of the three has the other two's.
 - `shippers.<name>` — `shipper` (from the catalogue) and `ships`, the name of a declared LOG store.
   No `retention`, no growth term, no `exposure`, no `slot`: a shipper keeps nothing and is dialled
   by nothing.
-- `dashboards.<name>` — `dashboard`, plus `reads` (names of declared stores, at least one) and the
-  two fronted options `exposure` and `slot`. No URL option exists.
+- `dashboards.<name>` — `dashboard`, plus `reads` (names of declared stores, at least one), optional
+  private `namespace`, `authentication` (`credentials` by default or explicit `anonymous-admin`),
+  and the two fronted options `exposure` and `slot`. Anonymous administrator access is refused on
+  a public front and cannot be mixed with credentials or direct Grafana authentication variables.
+  No URL option exists.
 - `probers.<name>` — `prober`, plus `targets.<name>.url` (at least one) and the same two fronted
   options. **No option here can name anything on the observability path**, and every string it
   carries is scanned for one.
@@ -755,8 +764,9 @@ against what a running store reports about itself (`experiments/README.md` #005)
       six workload groups, the three pillars each with the growth term that prices it, the
       dashboard's typed relationship to the stores it reads, a shipper that is not a store, and
       slotless workloads that are slotless structurally
-- [x] the one-directional rule, structural in the cluster half: a path the catalogue owns, two
-      namespaces that must differ, no option on an alarm-path workload that could name a store,
+- [x] the one-directional rule, structural in the cluster half: a path the catalogue owns, resolved
+      observability namespaces that must all differ from the fixed alarm namespace, no option on
+      an alarm-path workload that could name a store,
       and a scan of every free-text string it does carry — proven in both directions, mutation
       tested, and re-checked on the rendered bytes
 - [ ] no declaration written against the cluster half has run a real cluster yet; the growth terms
