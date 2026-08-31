@@ -143,6 +143,15 @@ let
 
   goodCfg = (mkEnv good).config;
 
+  anonymous = lib.recursiveUpdate good {
+    nixwatch.cluster.dashboards.example-dashboard = {
+      authentication = "anonymous-admin";
+      credentials = lib.mkForce { };
+    };
+  };
+
+  anonymousCfg = (mkEnv anonymous).config;
+
   referenceCfg = (mkEnv (lib.recursiveUpdate good {
     nixwatch.cluster.metrics.example-metrics-stack.manifests = [ ];
   })).config;
@@ -197,6 +206,25 @@ let
     dashboard-missing-its-required-credential =
       lib.recursiveUpdate good {
         nixwatch.cluster.dashboards.example-dashboard.credentials = lib.mkForce { };
+      };
+
+    anonymous-admin-dashboard-exposed-publicly =
+      lib.recursiveUpdate good {
+        nixwatch.cluster.dashboards.example-dashboard = {
+          authentication = "anonymous-admin";
+          exposure = lib.mkForce "public";
+          credentials = lib.mkForce { };
+        };
+      };
+
+    anonymous-admin-dashboard-given-inert-credentials =
+      lib.recursiveUpdate good {
+        nixwatch.cluster.dashboards.example-dashboard.authentication = "anonymous-admin";
+      };
+
+    dashboard-bypassing-its-authentication-mode-with-environment =
+      lib.recursiveUpdate good {
+        nixwatch.cluster.dashboards.example-dashboard.env.GF_AUTH_ANONYMOUS_ENABLED = "true";
       };
 
     credential-role-the-software-does-not-read =
@@ -449,6 +477,7 @@ let
     (lib.attrNames catalogue);
 
   storeEntries = lib.filter (x: lib.elem x.group [ "metrics" "logs" "traces" ]) allEntries;
+  dashboardEntries = lib.filter (x: x.group == "dashboards") allEntries;
 
   ## ---------------------------------------------------------------------
   ## Positive resolution
@@ -613,6 +642,14 @@ let
       goodCfg.nixk3s.apps.example-dashboard.secrets.adminPassword.secret == "example-dashboard-admin"
       && goodCfg.nixk3s.apps.example-dashboard.secrets.adminPassword.env.GF_SECURITY_ADMIN_PASSWORD == "password";
 
+    "anonymous administrator access is explicit, secret-free, and rendered as one coherent mode" =
+      renders anonymous
+      && anonymousCfg.nixk3s.apps.example-dashboard.secrets == { }
+      && anonymousCfg.nixk3s.apps.example-dashboard.env.GF_AUTH_ANONYMOUS_ENABLED == "true"
+      && anonymousCfg.nixk3s.apps.example-dashboard.env.GF_AUTH_ANONYMOUS_ORG_ROLE == "Admin"
+      && anonymousCfg.nixk3s.apps.example-dashboard.env.GF_AUTH_DISABLE_LOGIN_FORM == "true"
+      && anonymousCfg.nixk3s.apps.example-dashboard.env.GF_USERS_ALLOW_SIGN_UP == "false";
+
     "a probe watches the port the catalogue calls primary, with the software's own timing" =
       goodCfg.nixk3s.apps.example-metrics.probes.readiness.port == "http"
       && goodCfg.nixk3s.apps.example-metrics.probes.readiness.path == "/health"
@@ -653,6 +690,11 @@ let
         (x: x.entry.delivery != "image"
           || ((x.entry.ports ? ${x.entry.queryPort}) && (x.entry.ports ? ${x.entry.writePort})))
         storeEntries;
+
+    "every dashboard keeps credential authentication available as the safe default" =
+      lib.all
+        (x: lib.elem "credentials" x.entry.authenticationModes)
+        dashboardEntries;
 
     "a store taking its retention as an argument has a template to put it in, and one reading a file has none" =
       lib.all

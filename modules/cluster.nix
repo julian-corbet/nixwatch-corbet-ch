@@ -138,6 +138,18 @@ let
       })
       (envRolesOf x);
 
+  anonymousAdminEnv = {
+    GF_AUTH_ANONYMOUS_ENABLED = "true";
+    GF_AUTH_ANONYMOUS_ORG_ROLE = "Admin";
+    GF_AUTH_DISABLE_LOGIN_FORM = "true";
+    GF_USERS_ALLOW_SIGN_UP = "false";
+  };
+
+  authenticationEnvOf = x:
+    lib.optionalAttrs
+      (groupOf x == "dashboards" && x.w.authentication == "anonymous-admin")
+      anonymousAdminEnv;
+
   groupOf = x: x.root or x.kind;
 
   retentionArgsOf = x:
@@ -148,6 +160,7 @@ let
   extendApp = x@{ app, entry, w, ... }:
     app // {
       secrets = secretsOf x;
+      env = (app.env or { }) // authenticationEnvOf x;
       args = (entry.args or [ ]) ++ retentionArgsOf x ++ w.args;
     };
 
@@ -234,12 +247,15 @@ let
     (x:
       let
         known = lib.attrNames x.entry.credentials;
+        credentialsRequired =
+          !(groupOf x == "dashboards" && x.w.authentication == "anonymous-admin");
         unknown = lib.filter
           (role: !(x.entry.credentials ? ${role}))
           (lib.attrNames x.w.credentials);
         missing = lib.attrNames
           (lib.filterAttrs
-            (role: credential: credential.required && !(x.w.credentials ? ${role}))
+            (role: credential:
+              credentialsRequired && credential.required && !(x.w.credentials ? ${role}))
             x.entry.credentials);
       in
       [
@@ -284,6 +300,8 @@ let
         unrendered = lib.filter
           (name: knownStore name && !(renderedStore storeByName.${name}))
           x.w.reads;
+        authenticationEnvOverrides =
+          lib.intersectLists (lib.attrNames x.w.env) (lib.attrNames anonymousAdminEnv);
       in
       [
         {
@@ -303,6 +321,33 @@ let
           message =
             "nixwatch: dashboard `${x.name}` reads ${listNames unrendered}, which is delivered as a "
             + "chart. The chart owns its Service names, so this module cannot derive its address.";
+        }
+        {
+          assertion = lib.elem x.w.authentication x.entry.authenticationModes;
+          message =
+            "nixwatch: dashboard `${x.name}` selects authentication mode `${x.w.authentication}`, "
+            + "but `${x.entry.image}` implements only ${listNames x.entry.authenticationModes}.";
+        }
+        {
+          assertion = x.w.authentication != "anonymous-admin" || x.w.exposure != "public";
+          message =
+            "nixwatch: dashboard `${x.name}` grants anonymous users administrator access and is "
+            + "publicly exposed. `anonymous-admin` is allowed only on an internal or private-overlay "
+            + "front; choose credential authentication before exposing it publicly.";
+        }
+        {
+          assertion = x.w.authentication != "anonymous-admin" || x.w.credentials == { };
+          message =
+            "nixwatch: dashboard `${x.name}` selects `anonymous-admin` and also declares credentials. "
+            + "The login form is disabled in this mode, so those credentials are inert and misleading; "
+            + "remove them or choose `credentials`.";
+        }
+        {
+          assertion = authenticationEnvOverrides == [ ];
+          message =
+            "nixwatch: dashboard `${x.name}` sets authentication environment "
+            + "${listNames authenticationEnvOverrides} directly. Select `authentication` instead; "
+            + "the mode owns these variables as one checked unit so they cannot contradict each other.";
         }
       ])
     (workloadsOfKind "dashboards");
@@ -535,6 +580,12 @@ let
   };
 
   dashboardsOptions = sharedOptions // frontedOptions // {
+    authentication = lib.mkOption {
+      type = lib.types.enum [ "credentials" "anonymous-admin" ];
+      default = "credentials";
+      description =
+        "How a person enters this dashboard. Anonymous administrator access is refused on a public front.";
+    };
     reads = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [ ];

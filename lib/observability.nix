@@ -97,6 +97,12 @@
 #                                  `enforced` field says so per store.
 #   `retentionArg`   the argument template, or `null` for `retentionVia = "config"`.
 #
+# On a DASHBOARD entry only:
+#
+#   `authenticationModes`
+#                  explicit access modes the software can implement. The consumer chooses one;
+#                  the catalogue owns the exact environment that gives that choice meaning.
+#
 # On a SHIPPER entry only:
 #
 #   `perNode`      true when the software runs one copy on every node. The app grammar renders a
@@ -450,6 +456,7 @@
         adminUser = { env = "GF_SECURITY_ADMIN_USER"; required = false; };
         adminPassword = { env = "GF_SECURITY_ADMIN_PASSWORD"; required = true; };
       };
+      authenticationModes = [ "credentials" "anonymous-admin" ];
 
       note = ''
         The thing a person opens. It is a CONSUMER of the three pillars and never one of them: it
@@ -458,10 +465,12 @@
         and which is why it must be backed like any other, even though losing it loses no
         measurement.
 
-        ITS ADMIN PASSWORD IS REQUIRED HERE, deliberately, because the alternative is not "no
-        password" but a well-known default one. A dashboard with an exposure class beyond
-        `internal` and an unset admin credential is the classic self-hosted breach, and it is one
-        an eval-time refusal can prevent entirely.
+        CREDENTIALS ARE THE DEFAULT. In that mode the admin password is required because the
+        alternative is not "no password" but a well-known default one. Grafana can also implement
+        `anonymous-admin`, but that is a separate explicit mode rather than a missing Secret: the
+        module disables the login form, grants the anonymous organisation role Admin, refuses any
+        simultaneously declared credentials, and refuses public exposure. This records the real
+        security decision without putting a private hostname or network address in this catalogue.
 
         ITS DATA SOURCES ARE PROVISIONED FROM A FILE this module does not render. What the
         declaration buys instead is that the file cannot be written against a store that does not
