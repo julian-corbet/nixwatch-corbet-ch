@@ -563,7 +563,8 @@ let
     "a reader gets the store's QUERY port, which is not always the port writers use" =
       goodCfg.nixwatch.cluster.dashboardSources.example-dashboard.example-traces.url
       == "http://example-traces.example-observability.svc.cluster.local:3200"
-      && catalogue.traces.tempo.ports.${catalogue.traces.tempo.writePort} == 4317;
+      && catalogue.traces.tempo.ports.${catalogue.traces.tempo.writePort} == 4317
+      && catalogue.traces.tempo.ports.otlp-http == 4318;
 
     "a shipper's push address is derived from the log store it names, on the WRITE port" =
       goodCfg.nixwatch.cluster.shipperTargets.example-shipper == {
@@ -589,7 +590,8 @@ let
     "a store still renders a Service, because other components reach it by name" =
       goodCfg.nixk3s.apps.example-metrics.ports.http.number == 8428
       && goodCfg.nixk3s.apps.example-logs.ports.http.number == 3100
-      && goodCfg.nixk3s.apps.example-traces.ports.otlp-grpc.number == 4317;
+      && goodCfg.nixk3s.apps.example-traces.ports.otlp-grpc.number == 4317
+      && goodCfg.nixk3s.apps.example-traces.ports.otlp-http.number == 4318;
 
     "and it is never fronted: a store has no exposure option, so its class is the default" =
       goodCfg.nixk3s.apps.example-metrics.exposure == "internal"

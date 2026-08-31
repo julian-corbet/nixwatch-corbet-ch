@@ -320,9 +320,9 @@
       image = "docker.io/grafana/tempo";
       chart = null;
 
-      # Two ports, two audiences, and they are not interchangeable: one takes spans from
-      # instrumented software, the other answers a dashboard.
-      ports = { http = 3200; otlp-grpc = 4317; };
+      # Three ports, two audiences, and they are not interchangeable: OTLP writers may speak
+      # either gRPC or HTTP, while the query API answers dashboards and health checks.
+      ports = { http = 3200; otlp-grpc = 4317; otlp-http = 4318; };
       primaryPort = "http";
       scheme = "http";
       queryPort = "http";
