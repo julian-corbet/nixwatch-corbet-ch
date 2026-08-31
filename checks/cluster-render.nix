@@ -149,12 +149,17 @@ pkgs.runCommand "nixwatch-cluster-render"
   check "one replica" "1" "$(y '.spec.replicas' $MET_D)"
 
   echo
-  echo "== a trace store answers a reader on one port and takes spans on another =="
+  echo "== a trace store answers readers on one port and accepts both OTLP transports =="
   check "query port"   "3200" \
     "$(y '.spec.template.spec.containers[0].ports[] | select(.name == "http") | .containerPort' $TRC_D)"
-  check "write port"   "4317" \
+  check "OTLP gRPC write port"   "4317" \
     "$(y '.spec.template.spec.containers[0].ports[] | select(.name == "otlp-grpc") | .containerPort' $TRC_D)"
-  check "and the Service carries both, by name" "http" "$(y '.spec.ports[] | select(.port == 3200) | .targetPort' $TRC_S)"
+  check "OTLP HTTP write port"   "4318" \
+    "$(y '.spec.template.spec.containers[0].ports[] | select(.name == "otlp-http") | .containerPort' $TRC_D)"
+  check "the Service carries the query port by name" "http" \
+    "$(y '.spec.ports[] | select(.port == 3200) | .targetPort' $TRC_S)"
+  check "the Service carries OTLP HTTP by name" "otlp-http" \
+    "$(y '.spec.ports[] | select(.port == 4318) | .targetPort' $TRC_S)"
 
   echo
   echo "== TWO THINGS A PERSON OPENS, THE REST TALKED TO ONLY BY OTHER COMPONENTS =="
